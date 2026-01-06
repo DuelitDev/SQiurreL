@@ -3,48 +3,82 @@ use super::lexer::{Lexer, Token};
 use std::mem::{discriminant, replace};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Block {
-    pub stmts: Vec<Stmt>,
-}
-
-impl Block {
-    pub fn new(stmts: Vec<Stmt>) -> Self {
-        Self { stmts }
-    }
-
-    pub fn single(stmt: Stmt) -> Self {
-        Self { stmts: vec![stmt] }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     Create {
         table: Box<str>,
-        columns: Vec<(Box<str>, Box<str>)>,
+        defs: Box<Clause>,
+        clauses: Vec<Clause>,
     },
     Insert {
         table: Box<str>,
-        columns: Vec<Box<str>>,
-        values: Vec<Expr>,
+        columns: Box<Clause>,
+        values: Box<Clause>,
+        clauses: Vec<Clause>,
     },
     Select {
         table: Box<str>,
-        columns: Vec<Box<str>>,
-        filters: Option<Box<Expr>>,
+        columns: Box<Clause>,
+        clauses: Vec<Clause>,
     },
     Update {
         table: Box<str>,
-        assigns: Vec<(Box<str>, Expr)>,
-        filters: Option<Box<Expr>>,
+        assigns: Box<Clause>,
+        clauses: Vec<Clause>,
     },
     Delete {
         table: Box<str>,
-        filters: Option<Box<Expr>>,
+        clauses: Vec<Clause>,
     },
     Drop {
         table: Box<str>,
     },
+    Union {
+        left: Box<Stmt>,
+        right: Box<Stmt>,
+        all: bool,
+    },
+}
+
+impl Stmt {
+    pub fn boxed(self) -> Box<Self> {
+        Box::new(self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Clause {
+    Values(Vec<Expr>),               // expr
+    Columns(Vec<Box<str>>),          // col name
+    Assigns(Vec<(Box<str>, Expr)>),  // col name, expr
+    Defs(Vec<(Box<str>, Box<str>)>), // col name, col type
+    OrderBy(Vec<(Box<str>, bool)>),  // bool: true=ASC, false=DESC
+    Where(Box<Expr>),
+    Limit(u64),
+}
+
+macro_rules! as_clause {
+    ($name:ident, $variant:ident, $ret:ty) => {
+        pub fn $name(&self) -> Option<&$ret> {
+            if let Clause::$variant(inner) = self {
+                Some(inner)
+            } else {
+                None
+            }
+        }
+    };
+}
+
+impl Clause {
+    pub fn boxed(self) -> Box<Self> {
+        Box::new(self)
+    }
+    as_clause!(as_values, Values, Vec<Expr>);
+    as_clause!(as_columns, Columns, Vec<Box<str>>);
+    as_clause!(as_assigns, Assigns, Vec<(Box<str>, Expr)>);
+    as_clause!(as_defs, Defs, Vec<(Box<str>, Box<str>)>);
+    as_clause!(as_order_by, OrderBy, Vec<(Box<str>, bool)>);
+    as_clause!(as_where, Where, Expr);
+    as_clause!(as_limit, Limit, u64);
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -113,11 +147,11 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Block> {
+    pub fn parse(&mut self) -> Result<Vec<Stmt>> {
         self.parse_block(&[Token::Eof])
     }
 
-    fn parse_block(&mut self, terms: &[Token]) -> Result<Block> {
+    fn parse_block(&mut self, terms: &[Token]) -> Result<Vec<Stmt>> {
         let mut stmts = Vec::new();
         while !terms
             .iter()
@@ -130,7 +164,7 @@ impl Parser {
             let stmt = self.parse_stmt()?;
             stmts.push(stmt);
         }
-        Ok(Block::new(stmts))
+        Ok(stmts)
     }
 
     fn consume_ident(&mut self) -> Result<Box<str>> {
@@ -182,7 +216,11 @@ impl Parser {
                 }
             }
         }
-        Ok(Stmt::Create { table, columns })
+        Ok(Stmt::Create {
+            table,
+            defs: Clause::Defs(columns).boxed(),
+            clauses: vec![],
+        })
     }
 
     fn parse_insert(&mut self) -> Result<Stmt> {
@@ -228,13 +266,14 @@ impl Parser {
         }
         Ok(Stmt::Insert {
             table,
-            columns,
-            values,
+            columns: Clause::Columns(columns).boxed(),
+            values: Clause::Values(values).boxed(),
+            clauses: vec![],
         })
     }
 
     fn parse_select(&mut self) -> Result<Stmt> {
-        // SELECT <col1>, <col2>, ... FROM <table> [WHERE ...]
+        // SELECT <col1>, <col2>, ... FROM <table> [WHERE ...] [ORDER BY ...] [LIMIT ...]
         // SELECT <col1>, <col2>, ... 파싱
         self.expect(&Token::Select)?;
         let mut columns = Vec::new();
@@ -243,28 +282,29 @@ impl Parser {
             self.next()?;
             columns.push("*".into());
         } else {
-            // 괄호 선택 처리
-            let paren = self.maybe(&Token::LParen)?;
             loop {
                 columns.push(self.consume_ident()?);
                 if !self.maybe(&Token::Comma)? {
                     break;
                 }
             }
-            // 만약 괄호가 있다면, 반드시 닫기
-            if paren {
-                self.expect(&Token::RParen)?;
-            }
         }
         // FROM <table> 파싱
         self.expect(&Token::From)?;
         let table = self.consume_ident()?;
-        // TODO: [WHERE ...] 파싱
-        let filters = None;
+
+        let mut clauses = Vec::new();
+        // WHERE ...
+        if self.maybe(&Token::Where)? {
+            clauses.push(Clause::Where(self.parse_expr()?.boxed()));
+        }
+
+        // TODO: ORDER BY, LIMIT 파싱
+
         Ok(Stmt::Select {
             table,
-            columns,
-            filters,
+            columns: Clause::Columns(columns).boxed(),
+            clauses,
         })
     }
 
@@ -285,12 +325,16 @@ impl Parser {
                 break;
             }
         }
-        // TODO: [WHERE ...] 파싱
-        let filters = None;
+
+        let mut clauses = Vec::new();
+        if self.maybe(&Token::Where)? {
+            clauses.push(Clause::Where(self.parse_expr()?.boxed()));
+        }
+
         Ok(Stmt::Update {
             table,
-            assigns,
-            filters,
+            assigns: Clause::Assigns(assigns).boxed(),
+            clauses,
         })
     }
 
@@ -300,9 +344,13 @@ impl Parser {
         self.expect(&Token::Delete)?;
         self.expect(&Token::From)?;
         let table = self.consume_ident()?;
-        // TODO: [WHERE ...] 파싱
-        let filters = None;
-        Ok(Stmt::Delete { table, filters })
+
+        let mut clauses = Vec::new();
+        if self.maybe(&Token::Where)? {
+            clauses.push(Clause::Where(self.parse_expr()?.boxed()));
+        }
+
+        Ok(Stmt::Delete { table, clauses })
     }
 
     fn parse_drop(&mut self) -> Result<Stmt> {
@@ -314,6 +362,55 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> Result<Expr> {
+        self.parse_logical_or()
+    }
+
+    fn parse_logical_or(&mut self) -> Result<Expr> {
+        let mut left = self.parse_logical_and()?;
+        while self.maybe(&Token::Or)? {
+            let right = self.parse_logical_and()?;
+            left = Expr::Binary {
+                op: "OR".into(),
+                left: left.boxed(),
+                right: right.boxed(),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_logical_and(&mut self) -> Result<Expr> {
+        let mut left = self.parse_comparison()?;
+        while self.maybe(&Token::And)? {
+            let right = self.parse_comparison()?;
+            left = Expr::Binary {
+                op: "AND".into(),
+                left: left.boxed(),
+                right: right.boxed(),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_comparison(&mut self) -> Result<Expr> {
+        let left = self.parse_primary()?;
+        let op = match &self.curr {
+            Token::Eq => "=",
+            Token::Gt => ">",
+            Token::Lt => "<",
+            Token::Ge => ">=",
+            Token::Le => "<=",
+            _ => return Ok(left),
+        };
+        self.next()?;
+        let right = self.parse_primary()?;
+        Ok(Expr::Binary {
+            op: op.into(),
+            left: left.boxed(),
+            right: right.boxed(),
+        })
+    }
+
+    fn parse_primary(&mut self) -> Result<Expr> {
         match self.next()? {
             Token::Null => Ok(Expr::Null),
             Token::Bool(b) => Ok(Expr::Bool(b)),
@@ -323,19 +420,20 @@ impl Parser {
                 } else if let Ok(f) = n.parse::<f64>() {
                     Ok(Expr::Float(f))
                 } else {
-                    Err(QueryErr::InvalidExpr(format!(
-                        "Invalid number: {}",
-                        n.to_string() + ""
-                    )))
+                    Err(QueryErr::InvalidExpr(format!("Invalid number: {}", n)))
                 }
             }
             Token::Text(t) => Ok(Expr::Text(t.into_boxed_str())),
             Token::Ident(i) => Ok(Expr::Ident(i.into_boxed_str())),
+            Token::LParen => {
+                let expr = self.parse_expr()?;
+                self.expect(&Token::RParen)?;
+                Ok(expr)
+            }
             tok => Err(QueryErr::UnexpectedToken {
                 expected: "<expr>".into(),
                 found: format!("{:?}", tok),
             }),
-            // TODO: Unary, Binary, Call 파싱
         }
     }
 }
@@ -367,8 +465,8 @@ mod tests {
             stmt,
             Stmt::Select {
                 table: "users".into(),
-                columns: vec!["*".into()],
-                filters: None,
+                columns: Clause::Columns(vec!["*".into()]).boxed(),
+                clauses: vec![],
             }
         );
     }
@@ -382,8 +480,8 @@ mod tests {
             stmt,
             Stmt::Select {
                 table: "users".into(),
-                columns: vec!["id".into(), "name".into()],
-                filters: None,
+                columns: Clause::Columns(vec!["id".into(), "name".into()]).boxed(),
+                clauses: vec![],
             }
         );
     }
@@ -397,8 +495,41 @@ mod tests {
             stmt,
             Stmt::Insert {
                 table: "users".into(),
-                columns: vec!["id".into(), "name".into()],
-                values: vec![Expr::Int(1), Expr::Text("Alice".into())],
+                columns: Clause::Columns(vec!["id".into(), "name".into()]).boxed(),
+                values: Clause::Values(vec![Expr::Int(1), Expr::Text("Alice".into())]).boxed(),
+                clauses: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_select_where() {
+        let lexer = Lexer::new("SELECT * FROM users WHERE id = 1 AND name = 'Alice'");
+        let mut parser = Parser::new(lexer).unwrap();
+        let stmt = parser.parse_stmt().unwrap();
+
+        let expected_where = Expr::Binary {
+            op: "AND".into(),
+            left: Expr::Binary {
+                op: "=".into(),
+                left: Expr::Ident("id".into()).boxed(),
+                right: Expr::Int(1).boxed(),
+            }
+            .boxed(),
+            right: Expr::Binary {
+                op: "=".into(),
+                left: Expr::Ident("name".into()).boxed(),
+                right: Expr::Text("Alice".into()).boxed(),
+            }
+            .boxed(),
+        };
+
+        assert_eq!(
+            stmt,
+            Stmt::Select {
+                table: "users".into(),
+                columns: Clause::Columns(vec!["*".into()]).boxed(),
+                clauses: vec![Clause::Where(expected_where.boxed())],
             }
         );
     }
