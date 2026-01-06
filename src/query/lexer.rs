@@ -2,6 +2,9 @@ use std::collections::VecDeque;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
+    // 특수
+    Eof,
+    // 리터럴
     Null,
     Bool(bool),
     Num(String),
@@ -66,6 +69,10 @@ impl Lexer {
         ch.is_ascii_digit()
     }
 
+    fn finished(&self) -> bool {
+        self.src.is_empty()
+    }
+
     fn curr(&self) -> Option<char> {
         self.src.front().copied()
     }
@@ -88,6 +95,11 @@ impl Lexer {
 
     pub fn next(&mut self) -> Result<Token, LexErr> {
         self.skip_ws();
+        // 렉싱이 성공적으로 끝난 경우
+        if self.finished() {
+            return Ok(Token::Eof);
+        }
+        // 주석 파싱
         if self.peek(2) == "--" {
             self.walk();
             self.walk();
@@ -130,30 +142,6 @@ impl Lexer {
         })
     }
 
-    fn lex_num(&mut self, start: char) -> Result<Token, LexErr> {
-        let mut float = false;
-        let mut out = String::from(start);
-        while let Some(ch) = self.curr() {
-            // ! `curr()`의 반환값이 `Some`이므로 안전함
-            if Self::is_digit(ch) {
-                out.push(self.walk().unwrap());
-            } else if ch == '.' && !float {
-                float = true;
-                out.push(self.walk().unwrap());
-            } else {
-                break;
-            }
-        }
-        if out.is_empty() {
-            Err(LexErr::InvalidNum(out))
-        } else {
-            if float && out.ends_with('.') {
-                out.push('0');
-            }
-            Ok(Token::Num(out))
-        }
-    }
-
     fn lex_text(&mut self, quote: char) -> Result<Token, LexErr> {
         let mut out = String::new();
         while let Some(ch) = self.walk() {
@@ -178,6 +166,30 @@ impl Lexer {
             }
         }
         Err(LexErr::UnterminatedText)
+    }
+
+    fn lex_num(&mut self, start: char) -> Result<Token, LexErr> {
+        let mut float = false;
+        let mut out = String::from(start);
+        while let Some(ch) = self.curr() {
+            // ! `curr()`의 반환값이 `Some`이므로 안전함
+            if Self::is_digit(ch) {
+                out.push(self.walk().unwrap());
+            } else if ch == '.' && !float {
+                float = true;
+                out.push(self.walk().unwrap());
+            } else {
+                break;
+            }
+        }
+        if out.is_empty() {
+            Err(LexErr::InvalidNum(out))
+        } else {
+            if float && out.ends_with('.') {
+                out.push('0');
+            }
+            Ok(Token::Num(out))
+        }
     }
 
     fn lex_keyword(&mut self, start: char) -> Result<Token, LexErr> {
