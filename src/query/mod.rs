@@ -1,3 +1,5 @@
+mod lexer;
+
 pub struct TxId(u64);
 pub struct TableId(u64);
 pub struct ColumnId(u64);
