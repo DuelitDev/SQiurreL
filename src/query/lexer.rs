@@ -21,12 +21,19 @@ pub enum Token {
     Values, // VALUES
     Select, // SELECT
     From,   // FROM
-    Where,  // WHERE
     Update, // UPDATE
     Set,    // SET
     Alter,  // ALTER
     Delete, // DELETE
     Drop,   // DROP
+    Union,  // UNION
+    Where,  // WHERE
+    Order,  // ORDER
+    By,     // BY
+    Asc,    // ASC
+    Desc,   // DESC
+    Limit,  // LIMIT
+
     // 구분자
     Dot,       // .
     Comma,     // ,
@@ -222,12 +229,18 @@ impl Lexer {
             "VALUES" => Token::Values,
             "SELECT" => Token::Select,
             "FROM" => Token::From,
-            "WHERE" => Token::Where,
             "UPDATE" => Token::Update,
             "SET" => Token::Set,
             "ALTER" => Token::Alter,
             "DELETE" => Token::Delete,
             "DROP" => Token::Drop,
+            "UNION" => Token::Union,
+            "WHERE" => Token::Where,
+            "ORDER" => Token::Order,
+            "BY" => Token::By,
+            "ASC" => Token::Asc,
+            "DESC" => Token::Desc,
+            "LIMIT" => Token::Limit,
             "NOT" => Token::Not,
             "AND" => Token::And,
             "OR" => Token::Or,
