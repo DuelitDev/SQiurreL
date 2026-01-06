@@ -11,6 +11,11 @@ pub enum Token {
     Int(i64),
     Float(f64),
     Text(String),
+    // 타입
+    BoolType,  // BOOL, BOOLEAN
+    IntType,   // INT, INTEGER
+    FloatType, // FLOAT, DOUBLE
+    TextType,  // TEXT, STRING, VARCHAR
     // 식별자
     Ident(String),
     // 키워드
@@ -33,7 +38,6 @@ pub enum Token {
     Asc,    // ASC
     Desc,   // DESC
     Limit,  // LIMIT
-
     // 구분자
     Dot,       // .
     Comma,     // ,
@@ -219,9 +223,16 @@ impl Lexer {
         }
         // 키워드 매칭
         Ok(match out.to_uppercase().as_str() {
+            // 리터럴
             "NULL" => Token::Null,
             "TRUE" => Token::Bool(true),
             "FALSE" => Token::Bool(false),
+            // 타입
+            "BOOL" | "BOOLEAN" => Token::BoolType,
+            "INT" | "INTEGER" => Token::IntType,
+            "FLOAT" | "DOUBLE" => Token::FloatType,
+            "TEXT" | "STRING" | "VARCHAR" => Token::TextType,
+            // 키워드
             "CREATE" => Token::Create,
             "TABLE" => Token::Table,
             "INSERT" => Token::Insert,
@@ -241,6 +252,7 @@ impl Lexer {
             "ASC" => Token::Asc,
             "DESC" => Token::Desc,
             "LIMIT" => Token::Limit,
+            // 연산자
             "NOT" => Token::Not,
             "AND" => Token::And,
             "OR" => Token::Or,
