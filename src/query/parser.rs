@@ -189,7 +189,7 @@ impl Parser {
             Token::Delete => self.parse_delete(),
             Token::Drop => self.parse_drop(),
             tok => Err(QueryErr::UnexpectedToken {
-                expected: "<stmt>".into(),
+                expected: "SELECT, INSERT, UPDATE, DELETE, CREATE, DROP".into(),
                 found: format!("{:?}", tok),
             }),
         }
@@ -201,7 +201,7 @@ impl Parser {
         self.expect(&Token::Table)?;
         let table = self.consume_ident()?;
         let defs = self.parse_defs_clause()?.boxed();
-        let clauses = self.parse_optional_clauses();
+        let clauses = self.parse_optional_clauses()?;
         Ok(Stmt::Create {
             table,
             defs,
@@ -220,7 +220,7 @@ impl Parser {
             Clause::Columns(vec![])
         };
         let values = self.parse_values_clause()?;
-        let clauses = self.parse_optional_clauses();
+        let clauses = self.parse_optional_clauses()?;
         Ok(Stmt::Insert {
             table,
             columns: columns.boxed(),
@@ -235,7 +235,7 @@ impl Parser {
         let columns = self.parse_columns_clause()?;
         self.expect(&Token::From)?;
         let table = self.consume_ident()?;
-        let clauses = self.parse_optional_clauses();
+        let clauses = self.parse_optional_clauses()?;
         Ok(Stmt::Select {
             table,
             columns: columns.boxed(),
@@ -249,7 +249,7 @@ impl Parser {
         let table = self.consume_ident()?;
         self.expect(&Token::Set)?;
         let assigns = self.parse_assigns_clause()?;
-        let clauses = self.parse_optional_clauses();
+        let clauses = self.parse_optional_clauses()?;
         Ok(Stmt::Update {
             table,
             assigns: assigns.boxed(),
@@ -262,7 +262,7 @@ impl Parser {
         self.expect(&Token::Delete)?;
         self.expect(&Token::From)?;
         let table = self.consume_ident()?;
-        let clauses = self.parse_optional_clauses();
+        let clauses = self.parse_optional_clauses()?;
         Ok(Stmt::Delete { table, clauses })
     }
 
@@ -359,27 +359,26 @@ impl Parser {
         Ok(Clause::Defs(defs))
     }
 
-    fn parse_optional_clauses(&mut self) -> Vec<Clause> {
+    fn parse_optional_clauses(&mut self) -> Result<Vec<Clause>> {
         let mut clauses = Vec::new();
         loop {
             match &self.curr {
                 Token::Where => {
-                    self.next().unwrap();
-                    if let Ok(expr) = self.parse_expr(0) {
-                        clauses.push(Clause::Where(expr.boxed()));
-                    }
+                    self.next()?;
+                    let expr = self.parse_expr(0)?;
+                    clauses.push(Clause::Where(expr.boxed()));
                 }
                 _ => break,
             }
         }
-        clauses
+        Ok(clauses)
     }
 
     fn consume_ident(&mut self) -> Result<Box<str>> {
         match self.next()? {
             Token::Ident(name) => Ok(name.into_boxed_str()),
             tok => Err(QueryErr::UnexpectedToken {
-                expected: "<ident>".into(),
+                expected: "identifier".into(),
                 found: format!("{:?}", tok),
             }),
         }
@@ -407,7 +406,7 @@ impl Parser {
             }
             Token::LParen => self.parse_group(),
             tok => Err(QueryErr::UnexpectedToken {
-                expected: "literal, ident, or '('".into(),
+                expected: "expression (literal, identifier, or '(')".into(),
                 found: format!("{:?}", tok),
             }),
         }
@@ -429,7 +428,7 @@ impl Parser {
                 Ok(Expr::Binary { op, left, right })
             }
             _ => Err(QueryErr::UnexpectedToken {
-                expected: "<binary-op>".to_string(),
+                expected: "binary operator".to_string(),
                 found: format!("{:?}", token),
             }),
         }
