@@ -1,14 +1,15 @@
 use super::error::{QueryErr, Result};
 use std::collections::VecDeque;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     // 특수
     Eof,
     // 리터럴
     Null,
     Bool(bool),
-    Num(String),
+    Int(i64),
+    Float(f64),
     Text(String),
     // 식별자
     Ident(String),
@@ -107,6 +108,8 @@ impl Lexer {
             while let Some(ch) = self.walk()
                 && ch != '\n'
             {}
+            self.skip_ws();
+            return self.next();
         }
         let ch = self.walk().ok_or(QueryErr::UnexpectedEof)?;
         Ok(match ch {
@@ -185,11 +188,17 @@ impl Lexer {
         }
         if out.is_empty() {
             Err(QueryErr::InvalidNum(out))
-        } else {
-            if float && out.ends_with('.') {
+        } else if float {
+            if out.ends_with('.') {
                 out.push('0');
             }
-            Ok(Token::Num(out))
+            Ok(Token::Float(
+                out.parse::<f64>().map_err(|_| QueryErr::InvalidNum(out))?,
+            ))
+        } else {
+            Ok(Token::Int(
+                out.parse::<i64>().map_err(|_| QueryErr::InvalidNum(out))?,
+            ))
         }
     }
 
@@ -258,8 +267,8 @@ mod test {
     #[test]
     fn test_numbers() {
         let mut lexer = Lexer::new("123 45.67");
-        assert_eq!(lexer.next().unwrap(), Token::Num("123".to_string()));
-        assert_eq!(lexer.next().unwrap(), Token::Num("45.67".to_string()));
+        assert_eq!(lexer.next().unwrap(), Token::Int(123i64));
+        assert_eq!(lexer.next().unwrap(), Token::Float(45.67f64));
     }
 
     #[test]
@@ -304,7 +313,7 @@ mod test {
         assert_eq!(lexer.next().unwrap(), Token::Where);
         assert_eq!(lexer.next().unwrap(), Token::Ident("id".to_string()));
         assert_eq!(lexer.next().unwrap(), Token::Eq);
-        assert_eq!(lexer.next().unwrap(), Token::Num("1".to_string()));
+        assert_eq!(lexer.next().unwrap(), Token::Int(1i64));
         assert_eq!(lexer.next().unwrap(), Token::Semicolon);
     }
 
@@ -344,11 +353,9 @@ mod test {
     #[test]
     fn test_invalid_numbers() {
         let mut lexer = Lexer::new("1.2.3");
-        // 1.2 가 하나의 숫자로 인식되고, 그 다음 . 이 구분자로 인식되거나 혹은 에러가 나야 함.
-        // 현재 구현상으로는 1.2 까지 읽고 다음 next()에서 . 을 읽음.
-        assert_eq!(lexer.next().unwrap(), Token::Num("1.2".to_string()));
+        assert_eq!(lexer.next().unwrap(), Token::Float(1.2f64));
         assert_eq!(lexer.next().unwrap(), Token::Dot);
-        assert_eq!(lexer.next().unwrap(), Token::Num("3".to_string()));
+        assert_eq!(lexer.next().unwrap(), Token::Int(3i64));
     }
 
     #[test]
@@ -360,20 +367,9 @@ mod test {
     }
 
     #[test]
-    fn test_comments_eof() {
-        let mut lexer = Lexer::new("SELECT -- comment");
-        assert_eq!(lexer.next().unwrap(), Token::Select);
-        match lexer.next() {
-            Err(QueryErr::UnexpectedEof) => (),
-            _ => panic!("Expected UnexpectedEof after comment at end of string"),
-        }
-    }
-
-    #[test]
     fn test_hex_not_supported() {
         let mut lexer = Lexer::new("0x123");
-        // 0은 숫자로 인식, x는 식별자 시작으로 인식될 것임 (현재 구현상)
-        assert_eq!(lexer.next().unwrap(), Token::Num("0".to_string()));
+        assert_eq!(lexer.next().unwrap(), Token::Int(0i64));
         assert_eq!(lexer.next().unwrap(), Token::Ident("x123".to_string()));
     }
 }
