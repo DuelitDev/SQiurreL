@@ -1,15 +1,13 @@
+use crate::query::{ColumnId, RowId, TableId};
 use std::cmp::PartialEq;
-use std::fmt::format;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::SeekFrom;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
 use tokio::{fs, io};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
-use crate::query::{ColumnId, RowId, TableId};
 
 #[repr(u8)]
 #[derive(PartialEq, Eq, Hash, Clone, Debug, Copy)]
 pub enum DataType {
-
     Int = 11,
     Float = 12,
     Bool = 13,
@@ -26,7 +24,7 @@ pub enum DataValue {
 
 impl DataType {
     pub fn as_str(self) -> &'static str {
-        match(self) {
+        match self {
             DataType::Int => "Int",
             DataType::Float => "Float",
             DataType::Bool => "Bool",
@@ -47,19 +45,19 @@ impl DataValue {
     }
 }
 
-async fn create_table(name: String) -> tokio::io::Result<TableId> {
+pub async fn create_table(name: String) -> io::Result<TableId> {
     let mut hasher = DefaultHasher::new();
     name.hash(&mut hasher);
     let val = hasher.finish();
     fs::create_dir(val.to_string()).await?;
     let mut file = fs::File::create(format!("{}/schema", val)).await?;
     file.write_all(format!("NAME {}\n", name).as_bytes()).await?;
-    file.write_all("LAST_ID 00000000\n".as_bytes()).await?;
+    file.write_all("LAST_ID 0000000000000000\n".as_bytes()).await?;
     file.flush().await?;
     Ok(TableId(val))
 }
 
-async fn create_column(table_id: TableId, col_name: String, col_type: DataType) -> tokio::io::Result<ColumnId> {
+pub async fn create_column(table_id: TableId, col_name: String, col_type: DataType) -> tokio::io::Result<ColumnId> {
     let mut hasher = DefaultHasher::new();
     col_name.hash(&mut hasher);
     let val = hasher.finish();
@@ -69,7 +67,7 @@ async fn create_column(table_id: TableId, col_name: String, col_type: DataType) 
     Ok(ColumnId(val))
 }
 
-async fn create_row(table_id: TableId, values: Vec<DataValue>) -> tokio::io::Result<RowId> {
+pub async fn create_row(table_id: TableId, values: Vec<DataValue>) -> io::Result<RowId> {
     let mut file = fs::File::options().write(true).open(format!("{}/schema", table_id.0)).await?;
     let mut matching_count = 0;
     let pattern = "\nLAST_ID ";
@@ -94,10 +92,9 @@ async fn create_row(table_id: TableId, values: Vec<DataValue>) -> tokio::io::Res
     let mut hexadecimal = [0u8; 8];
     buffered.read_exact(&mut hexadecimal).await?;
     let hexadecimal = String::from_utf8_lossy(&hexadecimal);
-    println!("string: {}", hexadecimal);
     let parsed = u32::from_str_radix(&hexadecimal, 16).unwrap();
     buffered.seek(SeekFrom::Start(position)).await?;
-    buffered.write("00000001".as_bytes()).await?;
+    buffered.write(format!("{:016X}", parsed + 1).as_bytes()).await?;
 
     todo!()
 }
