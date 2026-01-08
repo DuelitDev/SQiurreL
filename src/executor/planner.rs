@@ -69,20 +69,20 @@ impl Planner {
     }
 }
 
-#[cfg(test)]
-use crate::query::parser::{Expr, Plan};
-
-
-#[test]
-fn testDataTransformation() {
-    let test_data_vec = vec![
-        TestData { integer1: 1, integer2: 2, integer3: 3, integer4: 4, integer5: 5 },
-        TestData { integer1: 6, integer2: 7, integer3: 8, integer4: 9, integer5: 10 }
-    ];
-
-    let table_name = "test_data";
-
-    let columns: Vec<Box<str>> = vec![
-        "integer1".into(), "integer2".into(), "integer3".into(), "integer4".into(), "integer5".into()
-    ];
-}
+// #[cfg(test)]
+// use crate::query::parser::{Expr, Plan};
+//
+//
+// #[test]
+// fn testDataTransformation() {
+//     let test_data_vec = vec![
+//         TestData { integer1: 1, integer2: 2, integer3: 3, integer4: 4, integer5: 5 },
+//         TestData { integer1: 6, integer2: 7, integer3: 8, integer4: 9, integer5: 10 }
+//     ];
+//
+//     let table_name = "test_data";
+//
+//     let columns: Vec<Box<str>> = vec![
+//         "integer1".into(), "integer2".into(), "integer3".into(), "integer4".into(), "integer5".into()
+//     ];
+// }
