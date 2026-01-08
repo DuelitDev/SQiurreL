@@ -214,10 +214,7 @@ impl Parser {
         self.expect(&Token::Values)?;
         clauses.push(self.parse_defs_clause()?);
         // INSERT는 부가 절이 없음
-        Ok(Stmt::Insert {
-            table,
-            clauses,
-        })
+        Ok(Stmt::Insert { table, clauses })
     }
 
     fn parse_select(&mut self) -> Result<Stmt> {
@@ -231,10 +228,7 @@ impl Parser {
         self.expect(&Token::From)?;
         let table = self.consume_ident()?;
         clauses.extend(self.parse_optional_clauses()?);
-        Ok(Stmt::Select {
-            table,
-            clauses,
-        })
+        Ok(Stmt::Select { table, clauses })
     }
 
     fn parse_update(&mut self) -> Result<Stmt> {
@@ -245,10 +239,7 @@ impl Parser {
         let mut clauses = vec![];
         clauses.push(self.parse_assigns_clause()?);
         clauses.extend(self.parse_optional_clauses()?);
-        Ok(Stmt::Update {
-            table,
-            clauses,
-        })
+        Ok(Stmt::Update { table, clauses })
     }
 
     fn parse_delete(&mut self) -> Result<Stmt> {
