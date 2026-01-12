@@ -41,6 +41,7 @@ pub enum Token {
     Set,      // SET
     Alter,    // ALTER
     Add,      // ADD
+    Column,   // COLUMN
     Rename,   // RENAME
     Delete,   // DELETE
     Truncate, // TRUNCATE
@@ -265,6 +266,7 @@ impl Lexer {
             "SET" => Token::Set,
             "ALTER" => Token::Alter,
             "ADD" => Token::Add,
+            "COLUMN" => Token::Column,
             "RENAME" => Token::Rename,
             "DELETE" => Token::Delete,
             "TRUNCATE" => Token::Truncate,
