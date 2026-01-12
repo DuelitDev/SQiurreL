@@ -147,24 +147,24 @@ impl Parser {
         ))
     }
 
-    fn expect(&mut self, token: &Token) -> Result<()> {
-        if discriminant(&self.curr) == discriminant(token) {
-            self.next()?;
-            Ok(())
-        } else {
-            Err(QueryErr::UnexpectedToken {
-                expected: format!("{:?}", token),
-                found: format!("{:?}", self.curr),
-            })
+    fn expect(&mut self, tokens: &[Token]) -> Result<()> {
+        for token in tokens {
+            if discriminant(&self.curr) == discriminant(token) {
+                self.next()?;
+            } else {
+                return Err(QueryErr::UnexpectedToken {
+                    expected: format!("{:?}", token),
+                    found: format!("{:?}", self.curr),
+                });
+            }
         }
+        Ok(())
     }
 
-    fn maybe(&mut self, token: &Token) -> Result<bool> {
-        if discriminant(&self.curr) == discriminant(token) {
-            self.next()?;
-            Ok(true)
-        } else {
-            Ok(false)
+    fn maybe(&mut self, tokens: &[Token]) -> bool {
+        match self.expect(tokens) {
+            Ok(_) => true,
+            Err(_) => false,
         }
     }
 
@@ -204,42 +204,36 @@ impl Parser {
     }
 
     fn parse_create(&mut self) -> Result<Stmt> {
-        // CREATE TABLE <table> (<col1> <type>, <col2> <type>, ...)
-        self.expect(&Token::Create)?;
-        self.expect(&Token::Table)?;
+        // CREATE TABLE [IF NOT EXISTS] <table> (<col1> <type>, <col2> <type>, ...)
+        self.expect(&[Token::Create, Token::Table])?;
+        let if_not_exists = self.maybe(&[Token::If, Token::Not, Token::Exists]);
         let table = self.consume_ident()?;
-        self.expect(&Token::LParen)?;
-        let mut defs = Vec::new();
-        loop {
-            let col_name = self.consume_ident()?;
-            let col_type = self.consume_ident()?;
-            defs.push((col_name, col_type));
-            match self.next()? {
-                Token::Comma => continue,
-                Token::RParen => break,
-                tok => {
-                    return Err(QueryErr::UnexpectedToken {
-                        expected: "',' or ')'".into(),
-                        found: format!("{:?}", tok),
-                    });
-                }
-            }
-        }
-        Ok(Stmt::Create { table, defs })
+        self.expect(&[Token::LParen])?;
+        let columns = self.parse_list_clause(true, |p| {
+            let col_name = p.consume_ident()?;
+            let col_type = p.consume_ident()?;
+            Ok((col_name, col_type))
+        })?;
+        Ok(Stmt::Create {
+            table,
+            columns,
+            if_not_exists,
+        })
     }
 
     fn parse_insert(&mut self) -> Result<Stmt> {
         // INSERT INTO <table> [(<col1>, <col2>, ...)] VALUES (<val1>, <val2>, ...)
-        self.expect(&Token::Insert)?;
-        self.expect(&Token::Into)?;
+        self.expect(&[Token::Insert, Token::Into])?;
         let table = self.consume_ident()?;
         let columns = if &self.curr == &Token::LParen {
-            self.parse_clause(true, |p| p.consume_ident())?
+            self.parse_list_clause(true, |p| p.consume_ident())?
         } else {
             vec![]
         };
-        self.expect(&Token::Values)?;
-        let values = self.parse_clause(false, |p| p.parse_expr(0))?;
+        self.expect(&[Token::Values])?;
+        let values = self.parse_list_clause(false, |p| {
+            p.parse_list_clause(true, |p| p.parse_expr(0))
+        })?;
         Ok(Stmt::Insert {
             table,
             columns,
@@ -248,17 +242,17 @@ impl Parser {
     }
 
     fn parse_select(&mut self) -> Result<Stmt> {
-        // SELECT <col1>, <col2>, ... FROM <table>
+        // SELECT [DISTINCT] <col1>, <col2>, ... FROM <table>
         //     [WHERE] [GROUP BY] [HAVING] [ORDER BY] [LIMIT]
-        self.expect(&Token::Select)?;
-        let mut clauses = vec![];
+        self.expect(&[Token::Select])?;
+        let distinct = self.maybe(&[Token::Distinct]);
         // 전체 컬럼 선택 '*' 처리
-        let columns = if !self.maybe(&Token::Mul)? {
-            self.parse_clause(false, |p| p.consume_ident())?
+        let columns = if !self.maybe(&[Token::Mul]) {
+            self.parse_list_clause(false, |p| p.parse_expr(0))?
         } else {
             vec![]
         };
-        self.expect(&Token::From)?;
+        self.expect(&[Token::From])?;
         let table = self.consume_ident()?;
         // TODO: 최소 구현 우선
         let where_clause = None;
@@ -266,53 +260,83 @@ impl Parser {
         let having = None;
         let order_by = None;
         let limit = None;
-        Ok(Stmt::Select { table, columns, where_clause, group_by, having, order_by, limit })
+        Ok(Stmt::Select {
+            table,
+            distinct,
+            columns,
+            where_clause,
+            group_by,
+            having,
+            order_by,
+            limit,
+        })
     }
 
     fn parse_update(&mut self) -> Result<Stmt> {
-        // UPDATE <table> SET <col1> = <val1>, <col2> = <val2>, ... [WHERE ...]
-        self.expect(&Token::Update)?;
+        // UPDATE <table> SET <col1> = <val1>, <col2> = <val2>, ... [WHERE]
+        self.expect(&[Token::Update])?;
         let table = self.consume_ident()?;
-        self.expect(&Token::Set)?;
-        let mut clauses = vec![];
-        clauses.push(self.parse_assigns_clause()?);
-        clauses.extend(self.parse_optional_clauses()?);
-        Ok(Stmt::Update { table, clauses })
+        self.expect(&[Token::Set])?;
+        let assigns = self.parse_list_clause(false, |p| {
+            let col_name = p.consume_ident()?;
+            p.expect(&[Token::Eq])?;
+            let val_expr = p.parse_expr(0)?;
+            Ok((col_name, val_expr))
+        })?;
+        // TODO: 최소 구현 우선
+        let where_clause = None;
+        Ok(Stmt::Update {
+            table,
+            assigns,
+            where_clause,
+        })
     }
 
     fn parse_delete(&mut self) -> Result<Stmt> {
-        // DELETE FROM <table> [WHERE ...]
-        self.expect(&Token::Delete)?;
-        self.expect(&Token::From)?;
+        // DELETE FROM <table> [WHERE]
+        self.expect(&[Token::Delete, Token::From])?;
         let table = self.consume_ident()?;
-        let clauses = self.parse_optional_clauses()?;
-        Ok(Stmt::Delete { table, clauses })
+        // TODO: 최소 구현 우선
+        let where_clause = None;
+        Ok(Stmt::Delete {
+            table,
+            where_clause,
+        })
     }
 
     fn parse_drop(&mut self) -> Result<Stmt> {
-        // DROP TABLE <table>
-        self.expect(&Token::Drop)?;
-        self.expect(&Token::Table)?;
+        // DROP TABLE [IF EXISTS] <table> [RESTRICT|CASCADE]
+        self.expect(&[Token::Drop, Token::Table])?;
         let table = self.consume_ident()?;
-        Ok(Stmt::Drop { table })
+        let if_exists = self.maybe(&[Token::If, Token::Exists]);
+        let cascade = !self.maybe(&[Token::Restrict]) && self.maybe(&[Token::Cascade]);
+        Ok(Stmt::Drop {
+            table,
+            if_exists,
+            cascade,
+        })
     }
 
-    fn parse_clause<T, F>(&mut self, with_parens: bool, mut parse_fn: F) -> Result<Vec<T>>
+    fn parse_list_clause<T, F>(
+        &mut self,
+        with_parens: bool,
+        mut parse_fn: F,
+    ) -> Result<Vec<T>>
     where
         F: FnMut(&mut Self) -> Result<T>,
     {
         if with_parens {
-            self.expect(&Token::LParen)?;
+            self.expect(&[Token::LParen])?;
         }
         let mut items = Vec::new();
         loop {
             items.push(parse_fn(self)?);
-            if !self.maybe(&Token::Comma)? {
+            if !self.maybe(&[Token::Comma]) {
                 break;
             }
         }
         if with_parens {
-            self.expect(&Token::RParen)?;
+            self.expect(&[Token::RParen])?;
         }
         Ok(items)
     }
@@ -372,7 +396,7 @@ impl Parser {
 
     fn parse_group(&mut self) -> Result<Expr> {
         let expr = self.parse_expr(0)?;
-        self.expect(&Token::RParen)?;
+        self.expect(&[Token::RParen])?;
         Ok(expr)
     }
 
