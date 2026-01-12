@@ -41,6 +41,7 @@ pub enum Token {
     Set,      // SET
     Alter,    // ALTER
     Delete,   // DELETE
+    Truncate, // TRUNCATE
     Drop,     // DROP
     Restrict, // RESTRICT
     Cascade,  // CASCADE
@@ -262,6 +263,7 @@ impl Lexer {
             "SET" => Token::Set,
             "ALTER" => Token::Alter,
             "DELETE" => Token::Delete,
+            "TRUNCATE" => Token::Truncate,
             "DROP" => Token::Drop,
             "RESTRICT" => Token::Restrict,
             "CASCADE" => Token::Cascade,
