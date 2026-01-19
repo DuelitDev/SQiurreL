@@ -28,7 +28,7 @@ fn main() {
     }
     // ! 위 조건문에서 확인했으므로 안전
     let path = args.database.unwrap();
-    // TODO: Executor에서 데이터베이스를 열기
+    let mut exec = executor::Executor::new();
     println!("SQuirreL REPL (type '.exit' or '.quit' to stop)");
     let mut buffer = String::new();
     loop {
@@ -50,7 +50,7 @@ fn main() {
                 buffer.push_str(&input);
                 let src = std::mem::take(&mut buffer);
                 println!("{}", src);
-                // TODO: Executor에서 명령을 실행하기
+                exec.run(src);
             }
         } else {
             println!("Failed to read line.");
