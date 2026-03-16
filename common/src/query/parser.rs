@@ -1,6 +1,6 @@
+use super::ValType;
 use super::error::{QueryErr, Result};
 use super::lexer::{Lexer, Token};
-use crate::storage::DataType;
 use std::mem::{discriminant, replace};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -8,15 +8,15 @@ use std::mem::{discriminant, replace};
 pub enum Stmt {
     // CREATE TABLE [IF NOT EXISTS] <table> (<col1> <type>, <col2> <type>, ...)
     Create {
-        table: Box<str>,                    // table name
-        columns: Vec<(Box<str>, DataType)>, // col name, col type
-        if_not_exists: bool,                // run if not exists
+        table: Box<str>,                   // table name
+        columns: Vec<(Box<str>, ValType)>, // col name, col type
+        if_not_exists: bool,               // run if not exists
     },
     // INSERT INTO <table> [(<col1>, <col2>, ...)] VALUES (<val1>, <val2>, ...)
     InsertValues {
         table: Box<str>,        // table name
         columns: Vec<Box<str>>, // col name
-        rows: Vec<Vec<Expr>>, // row [val expr]
+        rows: Vec<Vec<Expr>>,   // row [val expr]
     },
     // SELECT [DISTINCT] <col1>, <col2>, ... FROM <table>
     //     [WHERE] [GROUP BY] [HAVING] [ORDER BY] [LIMIT]
@@ -38,7 +38,7 @@ pub enum Stmt {
     },
     AlterAdd {
         table: Box<str>,              // table name
-        column: (Box<str>, DataType), // col name, col type
+        column: (Box<str>, ValType), // col name, col type
     },
     AlterDrop {
         table: Box<str>,  // table name
@@ -76,7 +76,7 @@ pub enum Clause {
     Values(Vec<Expr>),               // expr
     Columns(Vec<Box<str>>),          // col name
     Assigns(Vec<(Box<str>, Expr)>),  // col name, expr
-    Defs(Vec<(Box<str>, DataType)>), // col name, col type
+    Defs(Vec<(Box<str>, ValType)>), // col name, col type
     OrderBy(Vec<(Box<Expr>, bool)>), // bool: true=ASC, false=DESC
     Where(Box<Expr>),
     Limit(u64),
@@ -85,11 +85,7 @@ pub enum Clause {
 macro_rules! as_clause {
     ($name:ident, $variant:ident, $ret:ty) => {
         pub fn $name(&self) -> Option<&$ret> {
-            if let Clause::$variant(inner) = self {
-                Some(inner)
-            } else {
-                None
-            }
+            if let Clause::$variant(inner) = self { Some(inner) } else { None }
         }
     };
 }
@@ -101,7 +97,7 @@ impl Clause {
     as_clause!(as_values, Values, Vec<Expr>);
     as_clause!(as_columns, Columns, Vec<Box<str>>);
     as_clause!(as_assigns, Assigns, Vec<(Box<str>, Expr)>);
-    as_clause!(as_defs, Defs, Vec<(Box<str>, DataType)>);
+    as_clause!(as_defs, Defs, Vec<(Box<str>, ValType)>);
     as_clause!(as_order_by, OrderBy, Vec<(Box<Expr>, bool)>);
     as_clause!(as_where, Where, Expr);
     as_clause!(as_limit, Limit, u64);
@@ -115,15 +111,8 @@ pub enum Expr {
     Float(f64),
     Text(Box<str>),
     Ident(Box<str>),
-    Unary {
-        op: Token,
-        right: Box<Expr>,
-    },
-    Binary {
-        op: Token,
-        left: Box<Expr>,
-        right: Box<Expr>,
-    },
+    Unary { op: Token, right: Box<Expr> },
+    Binary { op: Token, left: Box<Expr>, right: Box<Expr> },
 }
 
 impl Expr {
@@ -159,10 +148,7 @@ impl Parser {
     }
 
     fn next(&mut self) -> Result<Token> {
-        Ok(replace(
-            &mut self.curr,
-            replace(&mut self.peek, self.lexer.next()?),
-        ))
+        Ok(replace(&mut self.curr, replace(&mut self.peek, self.lexer.next()?)))
     }
 
     fn expect(&mut self, tokens: &[Token]) -> Result<()> {
@@ -195,10 +181,7 @@ impl Parser {
 
     fn parse_block(&mut self, terms: &[Token]) -> Result<Vec<Stmt>> {
         let mut stmts = Vec::new();
-        while !terms
-            .iter()
-            .any(|t| discriminant(t) == discriminant(&self.curr))
-        {
+        while !terms.iter().any(|t| discriminant(t) == discriminant(&self.curr)) {
             if self.curr == Token::Semicolon {
                 self.next()?;
                 continue;
@@ -236,11 +219,7 @@ impl Parser {
             let col_type = p.consume_type()?;
             Ok((col_name, col_type))
         })?;
-        Ok(Stmt::Create {
-            table,
-            columns,
-            if_not_exists,
-        })
+        Ok(Stmt::Create { table, columns, if_not_exists })
     }
 
     fn parse_insert(&mut self) -> Result<Stmt> {
@@ -264,15 +243,16 @@ impl Parser {
         }
     }
 
-    fn parse_insert_values(&mut self, table: Box<str>, columns: Vec<Box<str>>) -> Result<Stmt> {
+    fn parse_insert_values(
+        &mut self,
+        table: Box<str>,
+        columns: Vec<Box<str>>,
+    ) -> Result<Stmt> {
         // ... VALUES (<val1>, <val2>, ...)
-        let rows =
-            self.parse_list_clause(false, |p| p.parse_list_clause(true, |p| p.parse_expr(0)))?;
-        Ok(Stmt::InsertValues {
-            table,
-            columns,
-            rows,
-        })
+        let rows = self.parse_list_clause(false, |p| {
+            p.parse_list_clause(true, |p| p.parse_expr(0))
+        })?;
+        Ok(Stmt::InsertValues { table, columns, rows })
     }
 
     fn parse_select(&mut self) -> Result<Stmt> {
@@ -319,11 +299,7 @@ impl Parser {
         })?;
         // TODO: 최소 구현 우선
         let where_clause = None;
-        Ok(Stmt::Update {
-            table,
-            assigns,
-            where_clause,
-        })
+        Ok(Stmt::Update { table, assigns, where_clause })
     }
 
     fn parse_alter(&mut self) -> Result<Stmt> {
@@ -369,10 +345,7 @@ impl Parser {
         let table = self.consume_ident()?;
         // TODO: 최소 구현 우선
         let where_clause = None;
-        Ok(Stmt::Delete {
-            table,
-            where_clause,
-        })
+        Ok(Stmt::Delete { table, where_clause })
     }
 
     fn parse_truncate(&mut self) -> Result<Stmt> {
@@ -386,15 +359,16 @@ impl Parser {
         self.expect(&[Token::Drop, Token::Table])?;
         let if_exists = self.maybe(&[Token::If, Token::Exists])?;
         let table = self.consume_ident()?;
-        let cascade = !self.maybe(&[Token::Restrict])? && self.maybe(&[Token::Cascade])?;
-        Ok(Stmt::Drop {
-            table,
-            if_exists,
-            cascade,
-        })
+        let cascade =
+            !self.maybe(&[Token::Restrict])? && self.maybe(&[Token::Cascade])?;
+        Ok(Stmt::Drop { table, if_exists, cascade })
     }
 
-    fn parse_list_clause<T, F>(&mut self, with_parens: bool, mut parse_fn: F) -> Result<Vec<T>>
+    fn parse_list_clause<T, F>(
+        &mut self,
+        with_parens: bool,
+        mut parse_fn: F,
+    ) -> Result<Vec<T>>
     where
         F: FnMut(&mut Self) -> Result<T>,
     {
@@ -424,12 +398,12 @@ impl Parser {
         }
     }
 
-    fn consume_type(&mut self) -> Result<DataType> {
+    fn consume_type(&mut self) -> Result<ValType> {
         match self.next()? {
-            Token::BoolType => Ok(DataType::Bool),
-            Token::IntType => Ok(DataType::Int),
-            Token::FloatType => Ok(DataType::Float),
-            Token::TextType => Ok(DataType::VChar),
+            Token::BoolType => Ok(ValType::Bool),
+            Token::IntType => Ok(ValType::Int),
+            Token::FloatType => Ok(ValType::Float),
+            Token::TextType => Ok(ValType::String),
             tok => Err(QueryErr::UnexpectedToken {
                 expected: "type".into(),
                 found: format!("{:?}", tok),
@@ -505,15 +479,11 @@ mod tests {
         let input = "CREATE TABLE users (id INT, name TEXT);";
         let stmt = parse(input);
         match stmt {
-            Stmt::Create {
-                table,
-                columns,
-                if_not_exists,
-            } => {
+            Stmt::Create { table, columns, if_not_exists } => {
                 assert_eq!(table.as_ref(), "users");
                 assert_eq!(columns.len(), 2);
-                assert_eq!(columns[0], ("id".into(), DataType::Int));
-                assert_eq!(columns[1], ("name".into(), DataType::VChar));
+                assert_eq!(columns[0], ("id".into(), ValType::Int));
+                assert_eq!(columns[1], ("name".into(), ValType::String));
                 assert!(!if_not_exists);
             }
             _ => panic!("Expected Create stmt"),
@@ -522,14 +492,10 @@ mod tests {
         let input_if_not_exists = "CREATE TABLE IF NOT EXISTS items (price FLOAT);";
         let stmt = parse(input_if_not_exists);
         match stmt {
-            Stmt::Create {
-                table,
-                columns,
-                if_not_exists,
-            } => {
+            Stmt::Create { table, columns, if_not_exists } => {
                 assert_eq!(table.as_ref(), "items");
                 assert_eq!(columns.len(), 1);
-                assert_eq!(columns[0], ("price".into(), DataType::Float));
+                assert_eq!(columns[0], ("price".into(), ValType::Float));
                 assert!(if_not_exists);
             }
             _ => panic!("Expected Create stmt"),
@@ -541,11 +507,7 @@ mod tests {
         let input = "INSERT INTO users VALUES (1, 'Alice');";
         let stmt = parse(input);
         match stmt {
-            Stmt::InsertValues {
-                table,
-                columns,
-                rows,
-            } => {
+            Stmt::InsertValues { table, columns, rows } => {
                 assert_eq!(table.as_ref(), "users");
                 assert!(columns.is_empty()); // 컬럼 명시 안함
                 assert_eq!(rows.len(), 1); // 1 row
@@ -560,11 +522,7 @@ mod tests {
         let input_cols = "INSERT INTO users (id, name) VALUES (2, 'Bob');";
         let stmt = parse(input_cols);
         match stmt {
-            Stmt::InsertValues {
-                table,
-                columns,
-                rows,
-            } => {
+            Stmt::InsertValues { table, columns, rows } => {
                 assert_eq!(table.as_ref(), "users");
                 assert_eq!(columns.len(), 2);
                 assert_eq!(columns[0].as_ref(), "id");
@@ -580,12 +538,7 @@ mod tests {
         let input = "SELECT id, name FROM users;";
         let stmt = parse(input);
         match stmt {
-            Stmt::Select {
-                table,
-                columns,
-                distinct,
-                ..
-            } => {
+            Stmt::Select { table, columns, distinct, .. } => {
                 assert_eq!(table.as_ref(), "users");
                 assert_eq!(columns.len(), 2);
                 assert!(!distinct);
@@ -634,7 +587,7 @@ mod tests {
         match stmt {
             Stmt::AlterAdd { table, column } => {
                 assert_eq!(table.as_ref(), "users");
-                assert_eq!(column, ("age".into(), DataType::Int));
+                assert_eq!(column, ("age".into(), ValType::Int));
             }
             _ => panic!("Expected AlterAdd stmt"),
         }
@@ -689,11 +642,7 @@ mod tests {
         let input = "DROP TABLE items;";
         let stmt = parse(input);
         match stmt {
-            Stmt::Drop {
-                table,
-                if_exists,
-                cascade,
-            } => {
+            Stmt::Drop { table, if_exists, cascade } => {
                 assert_eq!(table.as_ref(), "items");
                 assert!(!if_exists);
                 assert!(!cascade);
@@ -704,9 +653,7 @@ mod tests {
         let input_opts = "DROP TABLE IF EXISTS items CASCADE;";
         let stmt = parse(input_opts);
         match stmt {
-            Stmt::Drop {
-                if_exists, cascade, ..
-            } => {
+            Stmt::Drop { if_exists, cascade, .. } => {
                 assert!(if_exists);
                 assert!(cascade);
             }
