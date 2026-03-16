@@ -1,2 +1,19 @@
-/target
-/.idea
+# Frontend
+**/node_modules
+apps/ui/build
+apps/ui/.svelte-kit
+
+# Backend
+**/target
+apps/tauri/gen
+
+
+# OS
+**/.DS_Store
+**/Thumbs.db
+
+# Env
+.env
+.env.*
+!.env.example
+!.env.test

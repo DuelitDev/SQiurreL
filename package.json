@@ -1,0 +1,32 @@
+{
+  "name": "scarlet-viewer",
+  "private": true,
+  "workspaces": [
+    "apps/ui"
+  ],
+  "scripts": {
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "ui:dev": "bun --filter ui dev",
+    "ui:build": "bun --filter ui build",
+    "server:dev": "bun --filter server dev",
+    "server:build": "bun --filter server build",
+    "app:dev": "tauri dev",
+    "app:build": "tauri build",
+    "ios:init": "tauri ios init",
+    "ios:dev": "tauri ios dev --open --host",
+    "android:init": "tauri android init",
+    "android:dev": "tauri android dev --open --host"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@tauri-apps/cli": "^2.10.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-svelte": "^3.15.2",
+    "globals": "^17.4.0",
+    "prettier": "^3.8.1",
+    "prettier-plugin-svelte": "^3.5.1",
+    "prettier-plugin-tailwindcss": "^0.7.2",
+    "typescript-eslint": "^8.57.0"
+  }
+}
