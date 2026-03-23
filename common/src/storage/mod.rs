@@ -4,9 +4,9 @@ mod record;
 
 pub mod error;
 pub mod meta;
-pub mod types;
 
-use error::{Result, StorageErr};
+use error::Result;
+pub use error::StorageErr;
 use header::FileHeader;
 use meta::{ColumnMeta, TableMeta};
 use record::*;

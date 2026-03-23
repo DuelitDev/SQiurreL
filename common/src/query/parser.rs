@@ -8,20 +8,20 @@ use std::mem::{discriminant, replace};
 pub enum Stmt {
     // CREATE TABLE [IF NOT EXISTS] <table> (<col1> <type>, <col2> <type>, ...)
     Create {
-        table: Box<str>,                    // table name
-        columns: Vec<(Box<str>, DataType)>, // col name, col type
+        table_name: Box<str>,               // table name
+        defines: Vec<(Box<str>, DataType)>, // col name, col type
         if_not_exists: bool,                // run if not exists
     },
     // INSERT INTO <table> [(<col1>, <col2>, ...)] VALUES (<val1>, <val2>, ...)
     InsertValues {
-        table: Box<str>,        // table name
+        table_name: Box<str>,   // table name
         columns: Vec<Box<str>>, // col name
         rows: Vec<Vec<Expr>>,   // row [val expr]
     },
     // SELECT [DISTINCT] <col1>, <col2>, ... FROM <table>
     //     [WHERE] [GROUP BY] [HAVING] [ORDER BY] [LIMIT]
     Select {
-        table: Box<str>,                     // table name
+        table_name: Box<str>,                // table name
         columns: Vec<Expr>,                  // col name (or expr)
         distinct: bool,                      // distinct flag
         where_clause: Option<Expr>,          // condition expr
@@ -32,36 +32,36 @@ pub enum Stmt {
     },
     // UPDATE <table> SET <col1> = <val1>, <col2> = <val2>, ... [WHERE]
     Update {
-        table: Box<str>,                // table name
+        table_name: Box<str>,           // table name
         assigns: Vec<(Box<str>, Expr)>, // col name, val expr
         where_clause: Option<Expr>,     // condition expr
     },
     AlterAdd {
-        table: Box<str>,              // table name
-        column: (Box<str>, DataType), // col name, col type
+        table_name: Box<str>,         // table name
+        define: (Box<str>, DataType), // col name, col type
     },
     AlterDrop {
-        table: Box<str>,  // table name
-        column: Box<str>, // col name
+        table_name: Box<str>, // table name
+        column: Box<str>,     // col name
     },
     AlterRename {
-        table: Box<str>,    // table name
-        new_name: Box<str>, // new table name
+        table_name: Box<str>, // table name
+        new_name: Box<str>,   // new table name
     },
     // DELETE FROM <table> [WHERE]
     Delete {
-        table: Box<str>,            // table name
+        table_name: Box<str>,       // table name
         where_clause: Option<Expr>, // condition expr
     },
     // TRUNCATE TABLE <table>
     Truncate {
-        table: Box<str>, // table name
+        table_name: Box<str>, // table name
     },
     // DROP TABLE [IF EXISTS] <table> [RESTRICT|CASCADE]
     Drop {
-        table: Box<str>, // table name
-        if_exists: bool, // run if exists
-        cascade: bool,   // run despite dependent
+        table_name: Box<str>, // table name
+        if_exists: bool,      // run if exists
+        cascade: bool,        // run despite dependent
     },
 }
 
@@ -194,7 +194,7 @@ impl Parser {
             let col_type = p.consume_type()?;
             Ok((col_name, col_type))
         })?;
-        Ok(Stmt::Create { table, columns, if_not_exists })
+        Ok(Stmt::Create { table_name: table, defines: columns, if_not_exists })
     }
 
     fn parse_insert(&mut self) -> Result<Stmt> {
@@ -230,7 +230,7 @@ impl Parser {
         let rows = self.parse_list_clause(false, |p| {
             p.parse_list_clause(true, |p| p.parse_expr(0))
         })?;
-        Ok(Stmt::InsertValues { table, columns, rows })
+        Ok(Stmt::InsertValues { table_name: table, columns, rows })
     }
 
     fn parse_select(&mut self) -> Result<Stmt> {
@@ -253,7 +253,7 @@ impl Parser {
         let order_by = None;
         let limit = None;
         Ok(Stmt::Select {
-            table,
+            table_name: table,
             distinct,
             columns,
             where_clause,
@@ -277,7 +277,7 @@ impl Parser {
         })?;
         // TODO: 최소 구현 우선
         let where_clause = None;
-        Ok(Stmt::Update { table, assigns, where_clause })
+        Ok(Stmt::Update { table_name: table, assigns, where_clause })
     }
 
     fn parse_alter(&mut self) -> Result<Stmt> {
@@ -305,19 +305,19 @@ impl Parser {
         let col_name = self.consume_ident()?;
         let col_type = self.consume_type()?;
         let column = (col_name, col_type);
-        Ok(Stmt::AlterAdd { table, column })
+        Ok(Stmt::AlterAdd { table_name: table, define: column })
     }
 
     fn parse_alter_drop(&mut self, table: Box<str>) -> Result<Stmt> {
         // ... DROP COLUMN <col_name>
         let column = self.consume_ident()?;
-        Ok(Stmt::AlterDrop { table, column })
+        Ok(Stmt::AlterDrop { table_name: table, column })
     }
 
     fn parse_alter_rename(&mut self, table: Box<str>) -> Result<Stmt> {
         // ... RENAME TO <new_table_name>
         let new_name = self.consume_ident()?;
-        Ok(Stmt::AlterRename { table, new_name })
+        Ok(Stmt::AlterRename { table_name: table, new_name })
     }
 
     fn parse_delete(&mut self) -> Result<Stmt> {
@@ -326,13 +326,13 @@ impl Parser {
         let table = self.consume_ident()?;
         // TODO: 최소 구현 우선
         let where_clause = None;
-        Ok(Stmt::Delete { table, where_clause })
+        Ok(Stmt::Delete { table_name: table, where_clause })
     }
 
     fn parse_truncate(&mut self) -> Result<Stmt> {
         self.expect(&[Token::Truncate, Token::Table])?;
         let table = self.consume_ident()?;
-        Ok(Stmt::Truncate { table })
+        Ok(Stmt::Truncate { table_name: table })
     }
 
     fn parse_drop(&mut self) -> Result<Stmt> {
@@ -342,7 +342,7 @@ impl Parser {
         let table = self.consume_ident()?;
         let cascade =
             !self.maybe(&[Token::Restrict])? && self.maybe(&[Token::Cascade])?;
-        Ok(Stmt::Drop { table, if_exists, cascade })
+        Ok(Stmt::Drop { table_name: table, if_exists, cascade })
     }
 
     fn parse_list_clause<T, F>(
