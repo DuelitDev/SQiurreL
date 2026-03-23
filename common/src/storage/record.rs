@@ -1,6 +1,10 @@
-use super::codec::{encode_str, read_str, read_u8, read_u32, read_u64};
+use super::codec::{
+    encode_str, encode_type, encode_value, read_str, read_type, read_u32, read_u64,
+    read_value,
+};
 use super::error::{Result, StorageErr};
-use super::types::{ColumnId, DataType, DataValue, RowId, TableId};
+use super::{ColumnId, RowId, TableId};
+use crate::schema::{DataType, DataValue};
 use std::io::{Read, Write};
 
 pub const RECORD_HEADER_LEN: u32 = 24;
@@ -89,7 +93,7 @@ impl Record {
             Self::ColumnCreate { table_id, column_id, name, data_type } => {
                 buf.extend_from_slice(&table_id.0.to_le_bytes());
                 buf.extend_from_slice(&column_id.0.to_le_bytes());
-                buf.push(data_type.encode());
+                encode_type(&mut buf, *data_type);
                 encode_str(&mut buf, name);
             }
             Self::ColumnDrop { table_id, column_id } => {
@@ -102,7 +106,7 @@ impl Record {
                 buf.extend_from_slice(&(values.len() as u32).to_le_bytes());
                 for (col_id, val) in values {
                     buf.extend_from_slice(&col_id.0.to_le_bytes());
-                    val.encode(&mut buf);
+                    encode_value(&mut buf, val);
                 }
             }
             Self::RowDelete { table_id, row_id } => {
@@ -182,7 +186,7 @@ fn parse_rec(kind: RecordKind, r: &mut &[u8]) -> Result<Option<Record>> {
         RecordKind::ColumnCreate => {
             let table_id = TableId(read_u64(r)?);
             let column_id = ColumnId(read_u64(r)?);
-            let data_type = DataType::read_from(r)?;
+            let data_type = read_type(r)?;
             let name = read_str(r)?;
             Ok(Some(Record::ColumnCreate { table_id, column_id, name, data_type }))
         }
@@ -198,7 +202,8 @@ fn parse_rec(kind: RecordKind, r: &mut &[u8]) -> Result<Option<Record>> {
             let mut values = Vec::with_capacity(count);
             for _ in 0..count {
                 let col_id = ColumnId(read_u64(r)?);
-                let val = DataValue::read_from(r)?;
+                let ty = read_type(r)?;
+                let val = read_value(r, ty)?;
                 values.push((col_id, val));
             }
             Ok(Some(Record::RowInsert { table_id, row_id, values }))
