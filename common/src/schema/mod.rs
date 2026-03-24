@@ -1,10 +1,10 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DataType {
-    Nil,
-    Int,
-    Real,
-    Bool,
-    Text,
+    Nil = 1,
+    Int = 2,
+    Real = 3,
+    Bool = 4,
+    Text = 5,
 }
 
 impl DataType {

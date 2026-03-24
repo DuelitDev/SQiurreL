@@ -78,11 +78,11 @@ replay 완료 후 다음 ID들을 계산한다:
 
 | Value | DataType |
 |------:|:---------|
-|     0 | Nil      |
-|     1 | Int      |
-|     2 | Real     |
-|     3 | Bool     |
-|     4 | Text     |
+|     1 | Nil      |
+|     2 | Int      |
+|     3 | Real     |
+|     4 | Bool     |
+|     5 | Text     |
 
 ### DataValue 형식
 
@@ -95,10 +95,10 @@ DataValue는 다음 형식으로 저장한다.
 
 | Tag | Variant | Payload     |
 |----:|:--------|:------------|
-|   0 | Nil     | void        |
-|   1 | Int     | i64         |
-|   2 | Real    | f64         |
-|   3 | Bool    | u8 (0 or 1) |
+|   1 | Nil     | void        |
+|   2 | Int     | i64         |
+|   3 | Real    | f64         |
+|   4 | Bool    | u8 (0 or 1) |
 |   4 | Text    | string      |
 
 ### 문자열
@@ -140,11 +140,9 @@ DataValue는 다음 형식으로 저장한다.
 | Order | Type   | Name      |
 |------:|:-------|:----------|
 |     1 | u64    | table_id  |
-|     2 | u64    | column_id |
-|     3 | u8     | data_type |
-|     4 | u8     | reserved  |
-|     5 | u16    | reserved  |
-|     6 | string | name      |
+|     2 | u64    | col_id    |
+|     3 | u8     | col_type  |
+|     4 | string | col_name  |
 
 규칙:
 
@@ -156,12 +154,9 @@ DataValue는 다음 형식으로 저장한다.
 | Order | Type     | Name          |
 |------:|:---------|:--------------|
 |     1 | u64      | table_id      |
-|     2 | u64      | column_id     |
-|     3 | u8       | change_mask   |
-|     4 | u8       | reserved      |
-|     5 | u16      | reserved      |
-|     6 | optional | new_name      |
-|     7 | optional | new_data_type |
+|     2 | u64      | col_id        |
+|     4 | u8       | new_col_type  |
+|     3 | string   | new_col_name  |
 
 change_mask 비트 정의:
 
@@ -178,7 +173,7 @@ v1 정책:
 | Order | Type | Name      |
 |------:|:-----|:----------|
 |     1 | u64  | table_id  |
-|     2 | u64  | column_id |
+|     2 | u64  | col_id    |
 
 규칙:
 
@@ -192,7 +187,7 @@ v1 정책:
 |------:|:-------------------|:------------|
 |     1 | u64                | table_id    |
 |     2 | u64                | row_id      |
-|     3 | u32                | value_count |
+|     3 | u32                | count       |
 |     4 | repeated DataValue | values      |
 
 규칙:
@@ -207,7 +202,7 @@ v1 정책:
 |------:|:---------------|:------------|
 |     1 | u64            | table_id    |
 |     2 | u64            | row_id      |
-|     3 | u32            | patch_count |
+|     3 | u32            | count       |
 |     4 | repeated patch | patches     |
 
 patch 형식:

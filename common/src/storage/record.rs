@@ -1,220 +1,185 @@
-use super::codec::{
-    encode_str, encode_type, encode_value, read_str, read_type, read_u32, read_u64,
-    read_value,
-};
-use super::error::{Result, StorageErr};
-use super::{ColumnId, RowId, TableId};
+use super::codec::{Decoder, Encoder};
+use super::error::Result;
+use super::{ColId, RowId, TableId};
 use crate::schema::{DataType, DataValue};
-use std::io::{Read, Write};
 
-pub const RECORD_HEADER_LEN: u32 = 24;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u16)]
-pub enum RecordKind {
-    TableCreate = 1,
-    TableDrop = 2,
-    ColumnCreate = 3,
-    ColumnAlter = 4,
-    ColumnDrop = 5,
-    RowInsert = 6,
-    RowUpdate = 7,
-    RowDelete = 8,
+trait Recordable: Sized {
+    fn encode(&self, enc: &mut Encoder);
+    fn decode(dec: &mut Decoder<&[u8]>) -> Result<Self>;
 }
 
-impl RecordKind {
-    fn from_u16(v: u16) -> Result<Self> {
-        match v {
-            1 => Ok(Self::TableCreate),
-            2 => Ok(Self::TableDrop),
-            3 => Ok(Self::ColumnCreate),
-            4 => Ok(Self::ColumnAlter),
-            5 => Ok(Self::ColumnDrop),
-            6 => Ok(Self::RowInsert),
-            7 => Ok(Self::RowUpdate),
-            8 => Ok(Self::RowDelete),
-            _ => Err(StorageErr::Corrupted(format!("unknown rec_type: {v}"))),
-        }
+pub struct TableCreate {
+    pub table_id: TableId,
+    pub table_name: Box<str>,
+}
+
+impl Recordable for TableCreate {
+    fn encode(&self, enc: &mut Encoder) {
+        enc.u64(self.table_id.0);
+        enc.text(&self.table_name);
+    }
+
+    fn decode(dec: &mut Decoder<&[u8]>) -> Result<Self> {
+        Ok(Self { table_id: TableId(dec.u64()?), table_name: dec.text()? })
     }
 }
 
-#[derive(Debug)]
-pub enum Record {
-    TableCreate {
-        table_id: TableId,
-        name: Box<str>,
-    },
-    TableDrop {
-        table_id: TableId,
-    },
-    ColumnCreate {
-        table_id: TableId,
-        column_id: ColumnId,
-        name: Box<str>,
-        data_type: DataType,
-    },
-    ColumnDrop {
-        table_id: TableId,
-        column_id: ColumnId,
-    },
-    RowInsert {
-        table_id: TableId,
-        row_id: RowId,
-        values: Vec<(ColumnId, DataValue)>,
-    },
-    RowDelete {
-        table_id: TableId,
-        row_id: RowId,
-    },
+pub struct TableDrop {
+    pub table_id: TableId,
 }
 
-impl Record {
-    pub fn kind(&self) -> RecordKind {
-        match self {
-            Self::TableCreate { .. } => RecordKind::TableCreate,
-            Self::TableDrop { .. } => RecordKind::TableDrop,
-            Self::ColumnCreate { .. } => RecordKind::ColumnCreate,
-            Self::ColumnDrop { .. } => RecordKind::ColumnDrop,
-            Self::RowInsert { .. } => RecordKind::RowInsert,
-            Self::RowDelete { .. } => RecordKind::RowDelete,
-        }
+impl Recordable for TableDrop {
+    fn encode(&self, enc: &mut Encoder) {
+        enc.u64(self.table_id.0);
     }
 
-    pub fn encode(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-        match self {
-            Self::TableCreate { table_id, name } => {
-                buf.extend_from_slice(&table_id.0.to_le_bytes());
-                encode_str(&mut buf, name);
-            }
-            Self::TableDrop { table_id } => {
-                buf.extend_from_slice(&table_id.0.to_le_bytes());
-            }
-            Self::ColumnCreate { table_id, column_id, name, data_type } => {
-                buf.extend_from_slice(&table_id.0.to_le_bytes());
-                buf.extend_from_slice(&column_id.0.to_le_bytes());
-                encode_type(&mut buf, *data_type);
-                encode_str(&mut buf, name);
-            }
-            Self::ColumnDrop { table_id, column_id } => {
-                buf.extend_from_slice(&table_id.0.to_le_bytes());
-                buf.extend_from_slice(&column_id.0.to_le_bytes());
-            }
-            Self::RowInsert { table_id, row_id, values } => {
-                buf.extend_from_slice(&table_id.0.to_le_bytes());
-                buf.extend_from_slice(&row_id.0.to_le_bytes());
-                buf.extend_from_slice(&(values.len() as u32).to_le_bytes());
-                for (col_id, val) in values {
-                    buf.extend_from_slice(&col_id.0.to_le_bytes());
-                    encode_value(&mut buf, val);
-                }
-            }
-            Self::RowDelete { table_id, row_id } => {
-                buf.extend_from_slice(&table_id.0.to_le_bytes());
-                buf.extend_from_slice(&row_id.0.to_le_bytes());
-            }
-        }
-        buf
+    fn decode(dec: &mut Decoder<&[u8]>) -> Result<Self> {
+        Ok(Self { table_id: TableId(dec.u64()?) })
     }
 }
 
-// ── record I/O ──
-
-pub fn write_rec(w: &mut impl Write, rec: &Record, seq_no: u64) -> Result<()> {
-    let payload = rec.encode();
-    let total_len = RECORD_HEADER_LEN + payload.len() as u32;
-    let crc = crc32fast::hash(&payload);
-    w.write_all(&total_len.to_le_bytes())?;
-    w.write_all(&(rec.kind() as u16).to_le_bytes())?;
-    w.write_all(&0u16.to_le_bytes())?;
-    w.write_all(&seq_no.to_le_bytes())?;
-    w.write_all(&crc.to_le_bytes())?;
-    w.write_all(&0u32.to_le_bytes())?;
-    w.write_all(&payload)?;
-    Ok(())
+pub struct ColumnCreate {
+    pub table_id: TableId,
+    pub col_id: ColId,
+    pub col_type: DataType,
+    pub col_name: Box<str>,
 }
 
-pub fn read_rec(r: &mut impl Read) -> Result<Option<Record>> {
-    let mut hdr = [0u8; 24];
-    match r.read_exact(&mut hdr) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
-        Err(e) => return Err(e.into()),
+impl Recordable for ColumnCreate {
+    fn encode(&self, enc: &mut Encoder) {
+        enc.u64(self.table_id.0);
+        enc.u64(self.col_id.0);
+        enc.ty(self.col_type);
+        enc.text(&self.col_name);
     }
 
-    let total_len = u32::from_le_bytes(hdr[0..4].try_into().unwrap());
-    if total_len < RECORD_HEADER_LEN {
-        return Err(StorageErr::Corrupted(format!(
-            "total_len {total_len} < {RECORD_HEADER_LEN}"
-        )));
+    fn decode(dec: &mut Decoder<&[u8]>) -> Result<Self> {
+        Ok(Self {
+            table_id: TableId(dec.u64()?),
+            col_id: ColId(dec.u64()?),
+            col_type: dec.ty()?,
+            col_name: dec.text()?,
+        })
     }
-
-    let rec_type = u16::from_le_bytes(hdr[4..6].try_into().unwrap());
-    let kind = RecordKind::from_u16(rec_type)?;
-    let seq_no = u64::from_le_bytes(hdr[8..16].try_into().unwrap());
-    let expected_crc = u32::from_le_bytes(hdr[16..20].try_into().unwrap());
-
-    let payload_len = (total_len - RECORD_HEADER_LEN) as usize;
-    let mut payload = vec![0u8; payload_len];
-    match r.read_exact(&mut payload) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
-        Err(e) => return Err(e.into()),
-    }
-
-    let crc = crc32fast::hash(&payload);
-    if crc != expected_crc {
-        return Err(StorageErr::Corrupted(format!(
-            "crc32 mismatch at {seq_no}: expected {expected_crc:#x}, got {crc:#x}"
-        )));
-    }
-
-    parse_rec(kind, &mut &payload[..])
 }
 
-fn parse_rec(kind: RecordKind, r: &mut &[u8]) -> Result<Option<Record>> {
-    match kind {
-        RecordKind::TableCreate => {
-            let table_id = TableId(read_u64(r)?);
-            let name = read_str(r)?;
-            Ok(Some(Record::TableCreate { table_id, name }))
+pub struct ColumnAlter {
+    pub table_id: TableId,
+    pub col_id: ColId,
+    pub new_col_type: DataType,
+    pub new_col_name: Box<str>,
+}
+
+impl Recordable for ColumnAlter {
+    fn encode(&self, enc: &mut Encoder) {
+        enc.u64(self.table_id.0);
+        enc.u64(self.col_id.0);
+        enc.ty(self.new_col_type);
+        enc.text(&self.new_col_name);
+    }
+
+    fn decode(dec: &mut Decoder<&[u8]>) -> Result<Self> {
+        Ok(Self {
+            table_id: TableId(dec.u64()?),
+            col_id: ColId(dec.u64()?),
+            new_col_type: dec.ty()?,
+            new_col_name: dec.text()?,
+        })
+    }
+}
+
+pub struct ColumnDrop {
+    pub table_id: TableId,
+    pub col_id: ColId,
+}
+
+impl Recordable for ColumnDrop {
+    fn encode(&self, enc: &mut Encoder) {
+        enc.u64(self.table_id.0);
+        enc.u64(self.col_id.0);
+    }
+
+    fn decode(dec: &mut Decoder<&[u8]>) -> Result<Self> {
+        Ok(Self { table_id: TableId(dec.u64()?), col_id: ColId(dec.u64()?) })
+    }
+}
+
+pub struct RowInsert {
+    pub table_id: TableId,
+    pub row_id: RowId,
+    pub count: u64,
+    pub values: Vec<DataValue>,
+}
+
+impl Recordable for RowInsert {
+    fn encode(&self, enc: &mut Encoder) {
+        enc.u64(self.table_id.0);
+        enc.u64(self.row_id.0);
+        enc.u64(self.count);
+        for value in &self.values {
+            enc.value(value);
         }
-        RecordKind::TableDrop => {
-            let table_id = TableId(read_u64(r)?);
-            Ok(Some(Record::TableDrop { table_id }))
+    }
+
+    fn decode(dec: &mut Decoder<&[u8]>) -> Result<Self> {
+        let table_id = TableId(dec.u64()?);
+        let row_id = RowId(dec.u64()?);
+        let count = dec.u64()?;
+        let mut values = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            let ty = dec.ty()?;
+            let data = dec.value(ty)?;
+            values.push(data);
         }
-        RecordKind::ColumnCreate => {
-            let table_id = TableId(read_u64(r)?);
-            let column_id = ColumnId(read_u64(r)?);
-            let data_type = read_type(r)?;
-            let name = read_str(r)?;
-            Ok(Some(Record::ColumnCreate { table_id, column_id, name, data_type }))
+        Ok(Self { table_id, row_id, count, values })
+    }
+}
+
+pub struct RowUpdate {
+    pub table_id: TableId,
+    pub row_id: RowId,
+    pub count: u64,
+    pub patches: Vec<(ColId, DataValue)>,
+}
+
+impl Recordable for RowUpdate {
+    fn encode(&self, enc: &mut Encoder) {
+        enc.u64(self.table_id.0);
+        enc.u64(self.row_id.0);
+        enc.u64(self.count);
+        for (col_id, value) in &self.patches {
+            enc.u64(col_id.0);
+            enc.value(value);
         }
-        RecordKind::ColumnDrop => {
-            let table_id = TableId(read_u64(r)?);
-            let column_id = ColumnId(read_u64(r)?);
-            Ok(Some(Record::ColumnDrop { table_id, column_id }))
+    }
+
+    fn decode(dec: &mut Decoder<&[u8]>) -> Result<Self> {
+        let table_id = TableId(dec.u64()?);
+        let row_id = RowId(dec.u64()?);
+        let count = dec.u64()?;
+        let mut patches = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            let col_id = ColId(dec.u64()?);
+            let ty = dec.ty()?;
+            let data = dec.value(ty)?;
+            patches.push((col_id, data));
         }
-        RecordKind::RowInsert => {
-            let table_id = TableId(read_u64(r)?);
-            let row_id = RowId(read_u64(r)?);
-            let count = read_u32(r)? as usize;
-            let mut values = Vec::with_capacity(count);
-            for _ in 0..count {
-                let col_id = ColumnId(read_u64(r)?);
-                let ty = read_type(r)?;
-                let val = read_value(r, ty)?;
-                values.push((col_id, val));
-            }
-            Ok(Some(Record::RowInsert { table_id, row_id, values }))
-        }
-        RecordKind::RowDelete => {
-            let table_id = TableId(read_u64(r)?);
-            let row_id = RowId(read_u64(r)?);
-            Ok(Some(Record::RowDelete { table_id, row_id }))
-        }
-        kind => {
-            Err(StorageErr::Corrupted(format!("unsupported record kind: {kind:?}")))
-        }
+        Ok(Self { table_id, row_id, count, patches })
+    }
+}
+
+pub struct RowDelete {
+    pub table_id: TableId,
+    pub row_id: RowId,
+}
+
+impl Recordable for RowDelete {
+    fn encode(&self, enc: &mut Encoder) {
+        enc.u64(self.table_id.0);
+        enc.u64(self.row_id.0);
+    }
+
+    fn decode(dec: &mut Decoder<&[u8]>) -> Result<Self> {
+        Ok(Self { table_id: TableId(dec.u64()?), row_id: RowId(dec.u64()?) })
     }
 }
