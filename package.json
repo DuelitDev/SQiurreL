@@ -2,7 +2,7 @@
   "name": "scarlet-viewer",
   "private": true,
   "workspaces": [
-    "apps/ui"
+    "app/ui"
   ],
   "scripts": {
     "lint": "eslint .",

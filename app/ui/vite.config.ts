@@ -22,7 +22,7 @@ export default defineConfig({
     watch: {
       ignored: [
         '**/target/**',
-        '**/apps/tauri/**',
+        '**/app/tauri/**',
         '**/common/**',
       ],
     },

@@ -4,7 +4,7 @@
     "**/target": true,
     "**/node_modules": true,
     "**/*.lock": true,
-    "apps/ui/build": true,
-    "apps/ui/.svelte-kit": true
+    "app/ui/build": true,
+    "app/ui/.svelte-kit": true
   }
 }

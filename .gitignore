@@ -1,11 +1,11 @@
 # Frontend
 **/node_modules
-apps/ui/build
-apps/ui/.svelte-kit
+app/ui/build
+app/ui/.svelte-kit
 
 # Backend
 **/target
-apps/tauri/gen
+app/tauri/gen
 
 
 # OS
