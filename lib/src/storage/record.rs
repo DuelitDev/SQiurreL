@@ -4,7 +4,7 @@ use super::{ColId, RowId, SeqNo, TableId};
 use crate::schema::{DataType, DataValue};
 use std::io::{Read, Write};
 
-fn write_rec(w: &mut impl Write, rec: &impl Recordable, seq_no: SeqNo) {
+pub(super) fn write_rec(w: &mut impl Write, rec: &impl Recordable, seq_no: SeqNo) {
     // encode record to payload
     let mut enc = Encoder::new();
     rec.encode(&mut enc);

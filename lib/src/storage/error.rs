@@ -11,11 +11,17 @@ pub enum StorageErr {
     #[error("corrupted: {0}")]
     Corrupted(String),
 
-    #[error("table already exists: '{}' ({})", .name, .id.0)]
+    #[error("table already exists: '{name}' ({})", .id.0)]
     TableAlreadyExists { id: TableId, name: Box<str> },
 
-    #[error("column already exists: '{}' ({})", .name, .id.0)]
+    #[error("column already exists: '{name}' ({})", .id.0)]
     ColumnAlreadyExists { id: ColId, name: Box<str> },
+
+    #[error("cannot resolve table: {0}")]
+    CannotResolveTable(Box<str>),
+
+    #[error("cannot resolve column: {0}")]
+    CannotResolveColumn(Box<str>),
 
     #[error("table not found: {}", .0.0)]
     TableNotFound(TableId),

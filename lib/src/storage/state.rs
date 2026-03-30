@@ -106,6 +106,12 @@ impl DbState {
         id
     }
 
+    pub(super) fn next_seq_no(&mut self) -> SeqNo {
+        let id = self.next_seq_no;
+        self.next_seq_no.0 += 1;
+        id
+    }
+
     pub fn apply(&mut self, record: Record) -> Result<()> {
         match record {
             Record::TableCreate(rec) => self.apply_table_create(rec),
