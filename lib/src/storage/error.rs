@@ -11,19 +11,14 @@ pub enum StorageErr {
     #[error("corrupted: {0}")]
     Corrupted(String),
 
-    #[error("table id already exists: {}", .0.0)]
-    TableIdAlreadyExists(TableId),
+    #[error("table already exists: '{}' ({})", .name, .id.0)]
+    TableAlreadyExists { id: TableId, name: Box<str> },
 
-    #[error("table name already exists: {}", .0)]
-    TableNameAlreadyExists(Box<str>),
+    #[error("column already exists: '{}' ({})", .name, .id.0)]
+    ColumnAlreadyExists { id: ColId, name: Box<str> },
 
     #[error("table not found: {}", .0.0)]
     TableNotFound(TableId),
-
-    ColumnAlreadyExists {
-        table_id: TableId,
-        col_id: ColId,
-    },
 
     #[error("column not found: {}", .0.0)]
     ColumnNotFound(ColId),

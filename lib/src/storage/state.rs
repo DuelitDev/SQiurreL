@@ -108,96 +108,25 @@ impl DbState {
 
     pub fn apply(&mut self, record: Record) -> Result<()> {
         match record {
-            Record::TableCreate(rec) => self.apply_table_create(rec)?,
-            Record::TableDrop(rec) => self.apply_table_drop(rec)?,
-            // ── 컬럼 ──────────────────────────────────────────────────────
-            Record::ColumnCreate(rec) => self.apply_column_create(rec)?,
-
-            Record::ColumnAlter(rec) => {
-                let table = self.tables.get_mut(&rec.table_id).ok_or_else(|| {
-                    StorageErr::Corrupted(format!(
-                        "column_alter unknown table: {}",
-                        rec.table_id.0
-                    ))
-                })?;
-                let col =
-                    table.cols.iter_mut().find(|c| c.id == rec.col_id).ok_or_else(
-                        || {
-                            StorageErr::Corrupted(format!(
-                                "column_alter unknown col: {}",
-                                rec.col_id.0
-                            ))
-                        },
-                    )?;
-                col.name = rec.new_col_name;
-                col.data_type = rec.new_col_type;
-            }
-
-            Record::ColumnDrop(rec) => self.apply_column_drop(rec)?,
-
-            // ── 행 ────────────────────────────────────────────────────────
-            Record::RowInsert(r) => {
-                self.next_row_id = self.next_row_id.max(RowId(r.row_id.0 + 1));
-                let table = self.tables.get_mut(&r.table_id).ok_or_else(|| {
-                    StorageErr::Corrupted(format!(
-                        "row_insert unknown table: {}",
-                        r.table_id.0
-                    ))
-                })?;
-                // live_cols 순서대로 values를 매핑
-                let live_cols: Vec<ColId> =
-                    table.cols.iter().filter(|c| c.alive).map(|c| c.id).collect();
-                let values: HashMap<ColId, DataValue> =
-                    live_cols.into_iter().zip(r.values).collect();
-                table
-                    .rows
-                    .insert(r.row_id, RowState { id: r.row_id, values, alive: true });
-            }
-
-            Record::RowUpdate(r) => {
-                let table = self.tables.get_mut(&r.table_id).ok_or_else(|| {
-                    StorageErr::Corrupted(format!(
-                        "row_update unknown table: {}",
-                        r.table_id.0
-                    ))
-                })?;
-                let row = table.rows.get_mut(&r.row_id).ok_or_else(|| {
-                    StorageErr::Corrupted(format!(
-                        "row_update unknown row: {}",
-                        r.row_id.0
-                    ))
-                })?;
-                for (col_id, value) in r.patches {
-                    row.values.insert(col_id, value);
-                }
-            }
-
-            Record::RowDelete(r) => {
-                let table = self.tables.get_mut(&r.table_id).ok_or_else(|| {
-                    StorageErr::Corrupted(format!(
-                        "row_delete unknown table: {}",
-                        r.table_id.0
-                    ))
-                })?;
-                let row = table.rows.get_mut(&r.row_id).ok_or_else(|| {
-                    StorageErr::Corrupted(format!(
-                        "row_delete unknown row: {}",
-                        r.row_id.0
-                    ))
-                })?;
-                row.alive = false;
-            }
+            Record::TableCreate(rec) => self.apply_table_create(rec),
+            Record::TableDrop(rec) => self.apply_table_drop(rec),
+            Record::ColumnCreate(rec) => self.apply_column_create(rec),
+            Record::ColumnAlter(rec) => self.apply_column_alter(rec),
+            Record::ColumnDrop(rec) => self.apply_column_drop(rec),
+            Record::RowInsert(rec) => self.apply_row_insert(rec),
+            Record::RowUpdate(rec) => self.apply_row_update(rec),
+            Record::RowDelete(rec) => self.apply_row_delete(rec),
         }
-        Ok(())
     }
 
     pub fn apply_table_create(&mut self, rec: TableCreate) -> Result<()> {
         self.next_table_id = self.next_table_id.max(TableId(rec.table_id.0 + 1));
         for (id, table) in self.tables.iter() {
-            if table.name == rec.table_name {
-                return Err(StorageErr::TableNameAlreadyExists(rec.table_name));
-            } else if *id == rec.table_id {
-                return Err(StorageErr::TableIdAlreadyExists(rec.table_id));
+            if table.name == rec.table_name || *id == rec.table_id {
+                return Err(StorageErr::TableAlreadyExists {
+                    id: *id,
+                    name: rec.table_name,
+                });
             }
         }
         self.tables.insert(
@@ -226,6 +155,14 @@ impl DbState {
         let table = self
             .get_table_mut(&rec.table_id)
             .ok_or_else(|| StorageErr::TableNotFound(rec.table_id))?;
+        for col in &table.cols {
+            if col.name == rec.col_name || col.id == rec.col_id {
+                return Err(StorageErr::ColumnAlreadyExists {
+                    id: col.id,
+                    name: rec.col_name,
+                });
+            }
+        }
         table.cols.push(ColState {
             id: rec.col_id,
             name: rec.col_name,
@@ -259,14 +196,40 @@ impl DbState {
     }
 
     pub fn apply_row_insert(&mut self, rec: RowInsert) -> Result<()> {
-        todo!()
+        self.next_row_id = self.next_row_id.max(RowId(rec.row_id.0 + 1));
+        let table = self
+            .get_table_mut(&rec.table_id)
+            .ok_or_else(|| StorageErr::TableNotFound(rec.table_id))?;
+        let live_cols: Vec<_> = table.live_cols().map(|c| c.id).collect();
+        let values = live_cols.into_iter().zip(rec.values).collect();
+        let row = RowState { id: rec.row_id, values, alive: true };
+        table.rows.insert(rec.row_id, row);
+        Ok(())
     }
 
     pub fn apply_row_update(&mut self, rec: RowUpdate) -> Result<()> {
-        todo!()
+        let table = self
+            .get_table_mut(&rec.table_id)
+            .ok_or_else(|| StorageErr::TableNotFound(rec.table_id))?;
+        let row = table
+            .rows
+            .get_mut(&rec.row_id)
+            .ok_or_else(|| StorageErr::RowNotFound(rec.row_id))?;
+        for (col_id, value) in rec.patches {
+            row.values.insert(col_id, value);
+        }
+        Ok(())
     }
 
     pub fn apply_row_delete(&mut self, rec: RowDelete) -> Result<()> {
-        todo!()
+        let table = self
+            .get_table_mut(&rec.table_id)
+            .ok_or_else(|| StorageErr::TableNotFound(rec.table_id))?;
+        let row = table
+            .rows
+            .get_mut(&rec.row_id)
+            .ok_or_else(|| StorageErr::RowNotFound(rec.row_id))?;
+        row.alive = false;
+        Ok(())
     }
 }
