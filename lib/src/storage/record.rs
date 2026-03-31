@@ -50,6 +50,7 @@ pub(super) fn read_rec(r: &mut impl Read) -> Result<Record> {
     let mut dec = Decoder::new(payload.as_slice());
     let payload = match tag {
         TableCreate::TAG => TableCreate::decode(&mut dec)?,
+        TableTruncate::TAG => TableTruncate::decode(&mut dec)?,
         TableDrop::TAG => TableDrop::decode(&mut dec)?,
         ColumnCreate::TAG => ColumnCreate::decode(&mut dec)?,
         ColumnAlter::TAG => ColumnAlter::decode(&mut dec)?,
@@ -65,6 +66,7 @@ pub(super) fn read_rec(r: &mut impl Read) -> Result<Record> {
 
 pub enum Record {
     TableCreate(TableCreate),
+    TableTruncate(TableTruncate),
     TableDrop(TableDrop),
     ColumnCreate(ColumnCreate),
     ColumnAlter(ColumnAlter),
@@ -107,12 +109,28 @@ impl Recordable for TableCreate {
     }
 }
 
+pub struct TableTruncate {
+    pub table_id: TableId,
+}
+
+impl Recordable for TableTruncate {
+    const TAG: u8 = 12;
+
+    fn encode(&self, enc: &mut Encoder) {
+        enc.u64(self.table_id.0);
+    }
+
+    fn decode(dec: &mut Decoder<&[u8]>) -> Result<Record> {
+        Ok(Record::TableTruncate(Self { table_id: TableId(dec.u64()?) }))
+    }
+}
+
 pub struct TableDrop {
     pub table_id: TableId,
 }
 
 impl Recordable for TableDrop {
-    const TAG: u8 = 12;
+    const TAG: u8 = 13;
 
     fn encode(&self, enc: &mut Encoder) {
         enc.u64(self.table_id.0);
