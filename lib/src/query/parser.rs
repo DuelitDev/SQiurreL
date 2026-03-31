@@ -23,7 +23,7 @@ pub enum Stmt {
     InsertValues {
         table_name: Box<str>,   // table name
         columns: Vec<Box<str>>, // col name
-        rows: Vec<Vec<Expr>>,   // row [val expr]
+        values: Vec<Expr>,   // val expr
     },
     // SELECT [DISTINCT] <col1>, <col2>, ... FROM <table>
     //     [WHERE] [GROUP BY] [HAVING] [ORDER BY] [LIMIT]
@@ -231,10 +231,8 @@ impl Parser {
         columns: Vec<Box<str>>,
     ) -> Result<Stmt> {
         // ... VALUES (<val1>, <val2>, ...)
-        let rows = self.parse_list_clause(false, |p| {
-            p.parse_list_clause(true, |p| p.parse_expr(0))
-        })?;
-        Ok(Stmt::InsertValues { table_name: table, columns, rows })
+        let values = self.parse_list_clause(true, |p| p.parse_expr(0))?;
+        Ok(Stmt::InsertValues { table_name: table, columns, values })
     }
 
     fn parse_select(&mut self) -> Result<Stmt> {

@@ -27,3 +27,15 @@ pub enum DataValue {
     Bool(bool),
     Text(Box<str>),
 }
+
+impl DataValue {
+    pub fn data_type(&self) -> DataType {
+        match self {
+            DataValue::Nil => DataType::Nil,
+            DataValue::Int(_) => DataType::Int,
+            DataValue::Real(_) => DataType::Real,
+            DataValue::Bool(_) => DataType::Bool,
+            DataValue::Text(_) => DataType::Text,
+        }
+    }
+}
