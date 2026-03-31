@@ -39,10 +39,4 @@ impl FileHeader {
         let flags = d.u16()?;
         Ok(Self { flags })
     }
-
-    pub fn flush_to(&self, w: &mut (impl Write + Seek)) -> Result<()> {
-        w.seek(SeekFrom::Start(0))?;
-        self.write_to(w)?;
-        Ok(())
-    }
 }
