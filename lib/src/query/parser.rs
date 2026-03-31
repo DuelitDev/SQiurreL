@@ -154,25 +154,6 @@ impl Parser {
         }
     }
 
-    fn sync(&mut self) {
-        let terms = [
-            Token::Semicolon,
-            Token::Create,
-            Token::Insert,
-            Token::Select,
-            Token::Update,
-            Token::Alter,
-            Token::Delete,
-            Token::Truncate,
-            Token::Drop,
-        ];
-        while !terms.iter().any(|t| discriminant(&self.curr.token) == discriminant(t))
-            && discriminant(&self.curr.token) != discriminant(&Token::Eof)
-        {
-            self.next().ok();
-        }
-    }
-
     pub fn parse(&mut self) -> Result<Vec<SpannedStmt>> {
         let mut stmts = Vec::new();
         while discriminant(&Token::Eof) != discriminant(&self.curr.token) {

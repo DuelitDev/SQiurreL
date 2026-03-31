@@ -106,19 +106,16 @@ impl Storage {
 
 impl Storage {
     pub fn create_table(&mut self, name: &str) -> Result<TableId> {
-        // validate
-        if self.state.get_table_by_name(name).is_some() {
+        if let Some(table) = self.state.get_table_by_name(name) {
             return Err(StorageErr::TableAlreadyExists {
-                id: self.state.get_table_by_name(name).unwrap().id,
+                id: table.id,
                 name: name.into(),
             });
         }
-
         // build record
         let table_id = self.state.alloc_table();
         let seq = self.state.next_seq_no();
         let rec = TableCreate { table_id, table_name: name.into() };
-
         // write then commit
         write_rec(&mut self.file, &rec, seq)?;
         self.state.commit_table_create(rec);
@@ -126,7 +123,6 @@ impl Storage {
     }
 
     pub fn drop_table(&mut self, table_id: TableId) -> Result<()> {
-        // validate
         let table = self
             .state
             .get_table(&table_id)
@@ -134,11 +130,9 @@ impl Storage {
         if !table.alive {
             return Err(StorageErr::TableNotFound(table_id));
         }
-
         // build record
         let seq = self.state.next_seq_no();
         let rec = TableDrop { table_id };
-
         // write then commit
         write_rec(&mut self.file, &rec, seq)?;
         self.state.commit_table_drop(rec);
@@ -149,10 +143,6 @@ impl Storage {
         self.state
             .get_table_by_name(name)
             .ok_or_else(|| StorageErr::CannotResolveTable(name.into()))
-    }
-
-    pub fn table_exists(&self, name: &str) -> bool {
-        self.state.get_table_by_name(name).is_some()
     }
 
     pub fn create_column(
