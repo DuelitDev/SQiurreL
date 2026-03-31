@@ -90,7 +90,7 @@ impl Storage {
             match read_rec(&mut self.file) {
                 Ok(record) => {
                     self.state.next_seq_no();
-                    self.state.apply(record)?;
+                    self.state.commit(record);
                 }
                 Err(StorageErr::Io(e))
                     if e.kind() == std::io::ErrorKind::UnexpectedEof =>
@@ -106,19 +106,42 @@ impl Storage {
 
 impl Storage {
     pub fn create_table(&mut self, name: &str) -> Result<TableId> {
+        // validate
+        if self.state.get_table_by_name(name).is_some() {
+            return Err(StorageErr::TableAlreadyExists {
+                id: self.state.get_table_by_name(name).unwrap().id,
+                name: name.into(),
+            });
+        }
+
+        // build record
         let table_id = self.state.alloc_table();
         let seq = self.state.next_seq_no();
         let rec = TableCreate { table_id, table_name: name.into() };
-        write_rec(&mut self.file, &rec, seq);
-        self.state.apply_table_create(rec)?;
+
+        // write then commit
+        write_rec(&mut self.file, &rec, seq)?;
+        self.state.commit_table_create(rec);
         Ok(table_id)
     }
 
     pub fn drop_table(&mut self, table_id: TableId) -> Result<()> {
+        // validate
+        let table = self
+            .state
+            .get_table(&table_id)
+            .ok_or(StorageErr::TableNotFound(table_id))?;
+        if !table.alive {
+            return Err(StorageErr::TableNotFound(table_id));
+        }
+
+        // build record
         let seq = self.state.next_seq_no();
         let rec = TableDrop { table_id };
-        write_rec(&mut self.file, &rec, seq);
-        self.state.apply_table_drop(rec)?;
+
+        // write then commit
+        write_rec(&mut self.file, &rec, seq)?;
+        self.state.commit_table_drop(rec);
         Ok(())
     }
 
@@ -128,17 +151,38 @@ impl Storage {
             .ok_or_else(|| StorageErr::CannotResolveTable(name.into()))
     }
 
+    pub fn table_exists(&self, name: &str) -> bool {
+        self.state.get_table_by_name(name).is_some()
+    }
+
     pub fn create_column(
         &mut self,
         table_id: TableId,
         col_type: DataType,
         name: &str,
     ) -> Result<ColId> {
+        // validate
+        let table = self
+            .state
+            .get_table(&table_id)
+            .ok_or(StorageErr::TableNotFound(table_id))?;
+        for col in &table.cols {
+            if col.alive && &*col.name == name {
+                return Err(StorageErr::ColumnAlreadyExists {
+                    id: col.id,
+                    name: name.into(),
+                });
+            }
+        }
+
+        // build record
         let col_id = self.state.alloc_col();
         let seq = self.state.next_seq_no();
         let rec = ColumnCreate { table_id, col_id, col_type, col_name: name.into() };
-        write_rec(&mut self.file, &rec, seq);
-        self.state.apply_column_create(rec)?;
+
+        // write then commit
+        write_rec(&mut self.file, &rec, seq)?;
+        self.state.commit_column_create(rec);
         Ok(col_id)
     }
 
@@ -147,12 +191,25 @@ impl Storage {
         table_id: TableId,
         values: Vec<DataValue>,
     ) -> Result<RowId> {
+        // validate
+        let table = self
+            .state
+            .get_table(&table_id)
+            .ok_or(StorageErr::TableNotFound(table_id))?;
+        let live_col_count = table.live_cols().count();
+        if values.len() != live_col_count {
+            return Err(StorageErr::InvalidRow("column count mismatch"));
+        }
+
+        // build record
         let count = values.len() as u64;
         let row_id = self.state.alloc_row();
         let seq = self.state.next_seq_no();
         let rec = RowInsert { table_id, row_id, count, values };
-        write_rec(&mut self.file, &rec, seq);
-        self.state.apply_row_insert(rec)?;
+
+        // write then commit
+        write_rec(&mut self.file, &rec, seq)?;
+        self.state.commit_row_insert(rec);
         Ok(row_id)
     }
 }

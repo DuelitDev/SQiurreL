@@ -4,7 +4,11 @@ use super::{ColId, RowId, SeqNo, TableId};
 use crate::schema::{DataType, DataValue};
 use std::io::{Read, Write};
 
-pub(super) fn write_rec(w: &mut impl Write, rec: &impl Recordable, seq_no: SeqNo) {
+pub(super) fn write_rec(
+    w: &mut impl Write,
+    rec: &impl Recordable,
+    seq_no: SeqNo,
+) -> Result<()> {
     // encode record to payload
     let mut enc = Encoder::new();
     rec.encode(&mut enc);
@@ -19,8 +23,9 @@ pub(super) fn write_rec(w: &mut impl Write, rec: &impl Recordable, seq_no: SeqNo
     enc.u16(0); // reserved
     let header = enc.into_inner();
     // write header and payload
-    w.write_all(&header).unwrap();
-    w.write_all(&payload).unwrap();
+    w.write_all(&header)?;
+    w.write_all(&payload)?;
+    Ok(())
 }
 
 pub(super) fn read_rec(r: &mut impl Read) -> Result<Record> {
@@ -30,6 +35,7 @@ pub(super) fn read_rec(r: &mut impl Read) -> Result<Record> {
         return Err(StorageErr::Corrupted(format!("record length too small: {len}")));
     }
     let crc = dec.u32()?;
+    let _seq_no = dec.u32()?;
     let tag = dec.u8()?;
     let _flags = dec.u8()?;
     let _reserved = dec.u16()?;
@@ -69,7 +75,7 @@ pub enum Record {
 }
 
 impl Record {
-    pub(super) fn write_to(&self, w: &mut impl Write, seq_no: SeqNo) {
+    pub(super) fn write_to(&self, w: &mut impl Write, seq_no: SeqNo) -> Result<()> {
         match self {
             Self::TableCreate(r) => write_rec(w, r, seq_no),
             Self::TableDrop(r) => write_rec(w, r, seq_no),

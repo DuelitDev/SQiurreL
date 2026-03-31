@@ -1,4 +1,3 @@
-use super::error::{Result, StorageErr};
 use super::record::*;
 use super::{ColId, RowId, SeqNo, TableId};
 use crate::schema::{DataType, DataValue};
@@ -112,29 +111,21 @@ impl DbState {
         id
     }
 
-    pub fn apply(&mut self, record: Record) -> Result<()> {
+    pub fn commit(&mut self, record: Record) {
         match record {
-            Record::TableCreate(rec) => self.apply_table_create(rec),
-            Record::TableDrop(rec) => self.apply_table_drop(rec),
-            Record::ColumnCreate(rec) => self.apply_column_create(rec),
-            Record::ColumnAlter(rec) => self.apply_column_alter(rec),
-            Record::ColumnDrop(rec) => self.apply_column_drop(rec),
-            Record::RowInsert(rec) => self.apply_row_insert(rec),
-            Record::RowUpdate(rec) => self.apply_row_update(rec),
-            Record::RowDelete(rec) => self.apply_row_delete(rec),
+            Record::TableCreate(rec) => self.commit_table_create(rec),
+            Record::TableDrop(rec) => self.commit_table_drop(rec),
+            Record::ColumnCreate(rec) => self.commit_column_create(rec),
+            Record::ColumnAlter(rec) => self.commit_column_alter(rec),
+            Record::ColumnDrop(rec) => self.commit_column_drop(rec),
+            Record::RowInsert(rec) => self.commit_row_insert(rec),
+            Record::RowUpdate(rec) => self.commit_row_update(rec),
+            Record::RowDelete(rec) => self.commit_row_delete(rec),
         }
     }
 
-    pub fn apply_table_create(&mut self, rec: TableCreate) -> Result<()> {
+    pub fn commit_table_create(&mut self, rec: TableCreate) {
         self.next_table_id = self.next_table_id.max(TableId(rec.table_id.0 + 1));
-        for (id, table) in self.tables.iter() {
-            if table.name == rec.table_name || *id == rec.table_id {
-                return Err(StorageErr::TableAlreadyExists {
-                    id: *id,
-                    name: rec.table_name,
-                });
-            }
-        }
         self.tables.insert(
             rec.table_id,
             TableState {
@@ -145,97 +136,81 @@ impl DbState {
                 rows: HashMap::new(),
             },
         );
-        Ok(())
     }
 
-    pub fn apply_table_drop(&mut self, rec: TableDrop) -> Result<()> {
+    pub fn commit_table_drop(&mut self, rec: TableDrop) {
         let table = self
             .get_table_mut(&rec.table_id)
-            .ok_or_else(|| StorageErr::TableNotFound(rec.table_id))?;
+            .expect("corrupted: table not found during commit");
         table.alive = false;
-        Ok(())
     }
 
-    pub fn apply_column_create(&mut self, rec: ColumnCreate) -> Result<()> {
+    pub fn commit_column_create(&mut self, rec: ColumnCreate) {
         self.next_col_id = self.next_col_id.max(ColId(rec.col_id.0 + 1));
         let table = self
             .get_table_mut(&rec.table_id)
-            .ok_or_else(|| StorageErr::TableNotFound(rec.table_id))?;
-        for col in &table.cols {
-            if col.name == rec.col_name || col.id == rec.col_id {
-                return Err(StorageErr::ColumnAlreadyExists {
-                    id: col.id,
-                    name: rec.col_name,
-                });
-            }
-        }
+            .expect("corrupted: table not found during commit");
         table.cols.push(ColState {
             id: rec.col_id,
             name: rec.col_name,
             alive: true,
             data_type: rec.col_type,
         });
-        Ok(())
     }
 
-    pub fn apply_column_alter(&mut self, rec: ColumnAlter) -> Result<()> {
+    pub fn commit_column_alter(&mut self, rec: ColumnAlter) {
         let table = self
             .get_table_mut(&rec.table_id)
-            .ok_or_else(|| StorageErr::TableNotFound(rec.table_id))?;
+            .expect("corrupted: table not found during commit");
         let col = table
             .get_col_mut(&rec.col_id)
-            .ok_or_else(|| StorageErr::ColumnNotFound(rec.col_id))?;
+            .expect("corrupted: column not found during commit");
         col.name = rec.new_col_name;
         col.data_type = rec.new_col_type;
-        Ok(())
     }
 
-    pub fn apply_column_drop(&mut self, rec: ColumnDrop) -> Result<()> {
+    pub fn commit_column_drop(&mut self, rec: ColumnDrop) {
         let table = self
             .get_table_mut(&rec.table_id)
-            .ok_or_else(|| StorageErr::TableNotFound(rec.table_id))?;
+            .expect("corrupted: table not found during commit");
         let col = table
             .get_col_mut(&rec.col_id)
-            .ok_or_else(|| StorageErr::ColumnNotFound(rec.col_id))?;
+            .expect("corrupted: column not found during commit");
         col.alive = false;
-        Ok(())
     }
 
-    pub fn apply_row_insert(&mut self, rec: RowInsert) -> Result<()> {
+    pub fn commit_row_insert(&mut self, rec: RowInsert) {
         self.next_row_id = self.next_row_id.max(RowId(rec.row_id.0 + 1));
         let table = self
             .get_table_mut(&rec.table_id)
-            .ok_or_else(|| StorageErr::TableNotFound(rec.table_id))?;
+            .expect("corrupted: table not found during commit");
         let live_cols: Vec<_> = table.live_cols().map(|c| c.id).collect();
         let values = live_cols.into_iter().zip(rec.values).collect();
         let row = RowState { id: rec.row_id, values, alive: true };
         table.rows.insert(rec.row_id, row);
-        Ok(())
     }
 
-    pub fn apply_row_update(&mut self, rec: RowUpdate) -> Result<()> {
+    pub fn commit_row_update(&mut self, rec: RowUpdate) {
         let table = self
             .get_table_mut(&rec.table_id)
-            .ok_or_else(|| StorageErr::TableNotFound(rec.table_id))?;
+            .expect("corrupted: table not found during commit");
         let row = table
             .rows
             .get_mut(&rec.row_id)
-            .ok_or_else(|| StorageErr::RowNotFound(rec.row_id))?;
+            .expect("corrupted: row not found during commit");
         for (col_id, value) in rec.patches {
             row.values.insert(col_id, value);
         }
-        Ok(())
     }
 
-    pub fn apply_row_delete(&mut self, rec: RowDelete) -> Result<()> {
+    pub fn commit_row_delete(&mut self, rec: RowDelete) {
         let table = self
             .get_table_mut(&rec.table_id)
-            .ok_or_else(|| StorageErr::TableNotFound(rec.table_id))?;
+            .expect("corrupted: table not found during commit");
         let row = table
             .rows
             .get_mut(&rec.row_id)
-            .ok_or_else(|| StorageErr::RowNotFound(rec.row_id))?;
+            .expect("corrupted: row not found during commit");
         row.alive = false;
-        Ok(())
     }
 }

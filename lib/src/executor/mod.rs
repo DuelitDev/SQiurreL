@@ -83,7 +83,7 @@ impl Executor {
         }
         let table_id = self.storage.create_table(table_name)?;
         for (name, dt) in defines {
-            self.storage.create_column(table_id, &name, dt)?;
+            self.storage.create_column(table_id, dt, &name)?;
         }
         Ok(QueryResult::Success)
     }
@@ -94,7 +94,7 @@ impl Executor {
         columns: Vec<Box<str>>,
         rows: Vec<Vec<Expr>>,
     ) -> Result<QueryResult> {
-        let table = self.storage.resolve_table(table_name)?;
+        let table = self.storage.get_table(table_name)?;
         let table_id = table.id;
         let targets: Vec<_> = if columns.is_empty() {
             table.live_cols().map(|c| c.id).collect()
@@ -128,7 +128,7 @@ impl Executor {
         if if_exists && !self.storage.table_exists(table_name) {
             return Ok(QueryResult::Success);
         }
-        let table_id = self.storage.resolve_table(table_name)?.id;
+        let table_id = self.storage.get_table(table_name)?.id;
         self.storage.drop_table(table_id)?;
         Ok(QueryResult::Success)
     }
