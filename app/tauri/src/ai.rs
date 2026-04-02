@@ -12,11 +12,18 @@ pub struct AiSettings {
     pub endpoint: String,
     #[serde(default)]
     pub model: String,
+    #[serde(default)]
+    pub lang: String,
 }
 
 impl Default for AiSettings {
     fn default() -> Self {
-        Self { api_key: String::new(), endpoint: String::new(), model: String::new() }
+        Self {
+            api_key: String::new(),
+            endpoint: String::new(),
+            model: String::new(),
+            lang: String::new(),
+        }
     }
 }
 
@@ -444,6 +451,7 @@ pub fn save_ai_settings<R: Runtime>(
         api_key: settings.api_key.trim().to_string(),
         endpoint: settings.endpoint.trim().to_string(),
         model: settings.model.trim().to_string(),
+        lang: settings.lang.trim().to_string(),
     };
     let raw = serde_json::to_string_pretty(&normalized).map_err(|e| e.to_string())?;
     std::fs::write(path, raw).map_err(|e| e.to_string())
@@ -469,6 +477,11 @@ pub async fn list_models_with_saved_settings<R: Runtime>(
             saved.model
         } else {
             settings_override.model.trim().to_string()
+        },
+        lang: if settings_override.lang.trim().is_empty() {
+            saved.lang
+        } else {
+            settings_override.lang.trim().to_string()
         },
     };
 

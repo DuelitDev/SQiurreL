@@ -10,6 +10,7 @@
     saveAiSettings,
     type AiSettings
   } from '$lib/ai';
+  import { renderMarkdown } from '$lib/markdown';
   import QueryEditor from '$lib/QueryEditor.svelte';
   import QueryRowsResult from '$lib/QueryRowsResult.svelte';
 
@@ -26,7 +27,7 @@
   let settingsDialog = $state<HTMLDialogElement | null>(null);
   let promptDialog = $state<HTMLDialogElement | null>(null);
   let promptInput = $state<HTMLTextAreaElement | null>(null);
-  let aiSettings = $state<AiSettings>({ apiKey: '', endpoint: '', model: '' });
+  let aiSettings = $state<AiSettings>({ apiKey: '', endpoint: '', model: '', lang: '' });
   let settingsLoading = $state(true);
   let settingsSaving = $state(false);
   let modelsLoading = $state(false);
@@ -54,6 +55,11 @@
         aiSettings.apiKey = saved.apiKey;
         aiSettings.endpoint = saved.endpoint;
         aiSettings.model = saved.model;
+        aiSettings.lang = saved.lang;
+      }
+
+      if (!aiSettings.lang.trim()) {
+        aiSettings.lang = navigator.language || 'en';
       }
     } catch (error) {
       settingsError = error instanceof Error ? error.message : 'Failed to load AI settings.';
@@ -98,7 +104,8 @@
       const models = await listAiModels({
         apiKey: aiSettings.apiKey.trim(),
         endpoint: aiSettings.endpoint.trim(),
-        model: aiSettings.model.trim()
+        model: aiSettings.model.trim(),
+        lang: aiSettings.lang.trim()
       });
       availableModels = models;
       const firstModel = models[0];
@@ -181,7 +188,7 @@
     explanationDialog?.showModal();
 
     try {
-      errorExplanation = await explainQueryError(query, errorMessage);
+      errorExplanation = await explainQueryError(query, errorMessage, aiSettings.lang);
     } catch (error) {
       explanationError = error instanceof Error ? error.message : 'Failed to explain the error.';
     } finally {
@@ -208,13 +215,19 @@
       return;
     }
 
+    if (!aiSettings.lang.trim()) {
+      settingsError = 'LANG is required.';
+      return;
+    }
+
     settingsSaving = true;
 
     try {
       await saveAiSettings({
         apiKey: aiSettings.apiKey.trim(),
         endpoint: aiSettings.endpoint.trim(),
-        model: aiSettings.model.trim()
+        model: aiSettings.model.trim(),
+        lang: aiSettings.lang.trim()
       });
       settingsNotice = 'Saved.';
       settingsDialog?.close();
@@ -273,7 +286,7 @@
                 <div class="alert alert-error alert-soft flex items-start justify-between gap-3 px-2 py-1">
                   <span>{result.data}</span>
                   <button class="btn btn-xs btn-ghost" onclick={() => explainError(result.data)}>
-                    Explain
+                    <Icon icon="lucide:circle-help" width={14} height={14} />
                   </button>
                 </div>
               {/if}
@@ -387,6 +400,18 @@
           <p class="label">Loads models from the configured OpenAI-compatible endpoint.</p>
         </fieldset>
 
+        <fieldset class="fieldset">
+          <legend class="fieldset-legend">LANG</legend>
+          <input
+            class="input w-full"
+            placeholder="ko, en, ja, zh-CN"
+            bind:value={aiSettings.lang}
+            autocomplete="off"
+            disabled={settingsLoading || settingsSaving}
+          />
+          <p class="label">The AI uses this language for explanations and other natural-language responses.</p>
+        </fieldset>
+
         {#if modelsError}
           <div role="alert" class="alert alert-error alert-soft text-sm">{modelsError}</div>
         {/if}
@@ -488,8 +513,8 @@
         {:else if explanationError}
           <div role="alert" class="alert alert-error alert-soft text-sm">{explanationError}</div>
         {:else if errorExplanation}
-          <div class="bg-base-200 rounded-box whitespace-pre-wrap px-3 py-3 text-sm leading-6">
-            {errorExplanation}
+          <div class="bg-base-200 rounded-box px-4 py-3 text-sm leading-6 [&_code]:rounded [&_code]:bg-base-300 [&_code]:px-1.5 [&_code]:py-0.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-box [&_pre]:bg-base-300 [&_pre]:p-3 [&_ul]:list-disc [&_ul]:pl-5">
+            {@html renderMarkdown(errorExplanation)}
           </div>
         {/if}
       </div>

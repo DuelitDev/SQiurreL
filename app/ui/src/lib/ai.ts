@@ -4,6 +4,7 @@ export type AiSettings = {
   apiKey: string;
   endpoint: string;
   model: string;
+  lang: string;
 };
 
 export type ChatMessage = {
@@ -89,18 +90,23 @@ export async function generateQueryFromPrompt(
 
 export async function explainQueryError(
   currentQuery: string,
-  errorMessage: string
+  errorMessage: string,
+  language: string
 ): Promise<string> {
+  const retrievedEditorSource = currentQuery.trim()
+    ? `Retrieved context from current editor source:\n\n${currentQuery.trim()}`
+    : 'Retrieved context from current editor source: the editor is currently empty.';
+
   const response = await completeAiChat({
     temperature: 0.2,
     messages: [
       {
         role: 'system',
-        content: `You explain LiteSQRL query failures. ${LITESQRL_LIMITATIONS} Use the available tools when schema inspection or small read-only diagnostic SELECT queries would improve the diagnosis. Explain the likely cause, say clearly if LiteSQRL likely does not support the attempted syntax, and suggest a concrete next query or rewrite. Keep the answer concise and practical.`
+        content: `You explain LiteSQRL query failures. ${LITESQRL_LIMITATIONS} Treat the current editor source as retrieved context for diagnosis, and use the available tools when schema inspection or small read-only diagnostic SELECT queries would improve the diagnosis. Reply in Markdown. Answer in this language unless the user explicitly asked otherwise: ${language.trim() || 'en'}. Explain the likely cause, say clearly if LiteSQRL likely does not support the attempted syntax, and suggest a concrete next query or rewrite. Keep the answer concise and practical.`
       },
       {
         role: 'user',
-        content: `Query:\n${currentQuery.trim() || '(empty query)'}\n\nError:\n${errorMessage.trim()}`
+        content: `${retrievedEditorSource}\n\nObserved error:\n${errorMessage.trim()}`
       }
     ]
   });
