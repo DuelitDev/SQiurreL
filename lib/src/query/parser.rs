@@ -23,7 +23,7 @@ pub enum Stmt {
     InsertValues {
         table_name: Box<str>,   // table name
         columns: Vec<Box<str>>, // col name
-        values: Vec<Expr>,   // val expr
+        values: Vec<Expr>,      // val expr
     },
     // SELECT [DISTINCT] <col1>, <col2>, ... FROM <table>
     //     [WHERE] [GROUP BY] [HAVING] [ORDER BY] [LIMIT]
@@ -248,8 +248,7 @@ impl Parser {
         };
         self.expect(&[Token::From])?;
         let table = self.consume_ident()?;
-        // TODO: 최소 구현 우선
-        let where_clause = None;
+        let where_clause = self.parse_where_clause()?;
         let group_by = None;
         let having = None;
         let order_by = None;
@@ -277,8 +276,7 @@ impl Parser {
             let val_expr = p.parse_expr(0)?;
             Ok((col_name, val_expr))
         })?;
-        // TODO: 최소 구현 우선
-        let where_clause = None;
+        let where_clause = self.parse_where_clause()?;
         Ok(Stmt::Update { table_name: table, assigns, where_clause })
     }
 
@@ -326,9 +324,16 @@ impl Parser {
         // DELETE FROM <table> [WHERE]
         self.expect(&[Token::Delete, Token::From])?;
         let table = self.consume_ident()?;
-        // TODO: 최소 구현 우선
-        let where_clause = None;
+        let where_clause = self.parse_where_clause()?;
         Ok(Stmt::Delete { table_name: table, where_clause })
+    }
+
+    fn parse_where_clause(&mut self) -> Result<Option<Expr>> {
+        if self.maybe(&[Token::Where])? {
+            Ok(Some(self.parse_expr(0)?))
+        } else {
+            Ok(None)
+        }
     }
 
     fn parse_truncate(&mut self) -> Result<Stmt> {

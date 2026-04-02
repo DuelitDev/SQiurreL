@@ -231,6 +231,7 @@ impl Recordable for RowInsert {
         enc.u64(self.row_id.0);
         enc.u64(self.count);
         for value in &self.values {
+            enc.ty(value.data_type());
             enc.value(value);
         }
     }
@@ -265,6 +266,7 @@ impl Recordable for RowUpdate {
         enc.u64(self.count);
         for (col_id, value) in &self.patches {
             enc.u64(col_id.0);
+            enc.ty(value.data_type());
             enc.value(value);
         }
     }
