@@ -1,8 +1,14 @@
 <script lang="ts">
   import Icon from '@iconify/svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { onMount } from 'svelte';
-  import { loadAiSettings, saveAiSettings, type AiSettings } from '$lib/ai';
+  import { onMount, tick } from 'svelte';
+  import {
+    explainQueryError,
+    generateQueryFromPrompt,
+    loadAiSettings,
+    saveAiSettings,
+    type AiSettings
+  } from '$lib/ai';
   import QueryEditor from '$lib/QueryEditor.svelte';
   import QueryRowsResult from '$lib/QueryRowsResult.svelte';
 
@@ -17,11 +23,21 @@
   let running = $state(false);
   let elapsedMs = $state<number | null>(null);
   let settingsDialog = $state<HTMLDialogElement | null>(null);
+  let promptDialog = $state<HTMLDialogElement | null>(null);
+  let promptInput = $state<HTMLTextAreaElement | null>(null);
   let aiSettings = $state<AiSettings>({ apiKey: '', endpoint: '' });
   let settingsLoading = $state(true);
   let settingsSaving = $state(false);
   let settingsError = $state('');
   let settingsNotice = $state('');
+  let promptText = $state('');
+  let promptError = $state('');
+  let generatingQuery = $state(false);
+  let explanationDialog = $state<HTMLDialogElement | null>(null);
+  let explainingError = $state(false);
+  let explanationError = $state('');
+  let errorExplanation = $state('');
+  let selectedError = $state('');
 
   onMount(async () => {
     try {
@@ -50,6 +66,53 @@
     settingsError = '';
     settingsNotice = '';
     settingsDialog?.showModal();
+  }
+
+  async function openPromptDialog() {
+    promptError = '';
+    promptDialog?.showModal();
+    await tick();
+    promptInput?.focus();
+  }
+
+  async function generateQuery() {
+    promptError = '';
+
+    if (!promptText.trim()) {
+      promptError = 'Prompt is required.';
+      return;
+    }
+
+    generatingQuery = true;
+
+    try {
+      const generatedQuery = await generateQueryFromPrompt(promptText, query);
+      if (!generatedQuery.trim()) {
+        throw new Error('The AI response did not contain SQL.');
+      }
+      query = generatedQuery;
+      promptDialog?.close();
+    } catch (error) {
+      promptError = error instanceof Error ? error.message : 'Failed to generate a query.';
+    } finally {
+      generatingQuery = false;
+    }
+  }
+
+  async function explainError(errorMessage: string) {
+    selectedError = errorMessage;
+    errorExplanation = '';
+    explanationError = '';
+    explainingError = true;
+    explanationDialog?.showModal();
+
+    try {
+      errorExplanation = await explainQueryError(query, errorMessage);
+    } catch (error) {
+      explanationError = error instanceof Error ? error.message : 'Failed to explain the error.';
+    } finally {
+      explainingError = false;
+    }
   }
 
   async function saveSettings() {
@@ -91,7 +154,7 @@
         <h2 class="text-md font-semibold">Query</h2>
       </div>
       <div class="relative flex-1">
-        <QueryEditor bind:value={query} onrun={run} />
+        <QueryEditor bind:value={query} onrun={run} onprompt={openPromptDialog} />
         <div class="pointer-events-none absolute right-4 bottom-4 z-10">
           <button
             class="btn btn-success btn-circle btn-md pointer-events-auto shadow-lg"
@@ -127,8 +190,11 @@
               {:else if result.type === 'Rows'}
                 <QueryRowsResult cols={result.data.columns} rows={result.data.rows} />
               {:else if result.type === 'Err'}
-                <div class="alert alert-error alert-soft px-2 py-1">
-                  {result.data}
+                <div class="alert alert-error alert-soft flex items-start justify-between gap-3 px-2 py-1">
+                  <span>{result.data}</span>
+                  <button class="btn btn-xs btn-ghost" onclick={() => explainError(result.data)}>
+                    Explain
+                  </button>
                 </div>
               {/if}
             </div>
@@ -146,6 +212,11 @@
       <span>+</span>
       <kbd class="kbd kbd-sm">Enter</kbd>
       <span class="text-base-content/70">to run query</span>
+      <span class="text-base-content/30">|</span>
+      <kbd class="kbd kbd-sm">⌘</kbd>
+      <span>+</span>
+      <kbd class="kbd kbd-sm">I</kbd>
+      <span class="text-base-content/70">to prompt AI</span>
     </div>
     <div class="flex items-center gap-2">
       {#if settingsNotice}
@@ -224,6 +295,87 @@
     </div>
     <form method="dialog" class="modal-backdrop">
       <button>close</button>
+    </form>
+  </dialog>
+
+  <dialog bind:this={promptDialog} class="modal">
+    <div class="modal-box max-w-2xl">
+      <h3 class="text-base font-semibold">Generate Query</h3>
+      <p class="text-base-content/70 mt-2 text-sm">
+        Describe the query you want. The AI can inspect the current database DDL when needed.
+      </p>
+
+      <div class="mt-4 space-y-4">
+        <fieldset class="fieldset">
+          <legend class="fieldset-legend">Prompt</legend>
+          <textarea
+            bind:this={promptInput}
+            class="textarea h-36 w-full"
+            placeholder="List the last 20 inserted rows from orders with customer email and total amount."
+            bind:value={promptText}
+            disabled={generatingQuery}
+          ></textarea>
+          <p class="label">The generated SQL will replace the current editor contents.</p>
+        </fieldset>
+
+        {#if promptError}
+          <div role="alert" class="alert alert-error alert-soft text-sm">{promptError}</div>
+        {/if}
+      </div>
+
+      <div class="modal-action">
+        <form method="dialog">
+          <button class="btn btn-ghost" disabled={generatingQuery}>Cancel</button>
+        </form>
+        <button class="btn btn-primary" onclick={generateQuery} disabled={generatingQuery}>
+          {#if generatingQuery}
+            <span class="loading loading-spinner loading-xs"></span>
+          {:else}
+            Generate
+          {/if}
+        </button>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+      <button disabled={generatingQuery}>close</button>
+    </form>
+  </dialog>
+
+  <dialog bind:this={explanationDialog} class="modal">
+    <div class="modal-box max-w-2xl">
+      <h3 class="text-base font-semibold">Why This Error Happened</h3>
+      <p class="text-base-content/70 mt-2 text-sm">
+        The AI can inspect the current schema and run small read-only diagnostic queries if needed.
+      </p>
+
+      <div class="mt-4 space-y-4">
+        <fieldset class="fieldset">
+          <legend class="fieldset-legend">Error</legend>
+          <div class="bg-base-200 rounded-box px-3 py-2 text-sm">{selectedError}</div>
+        </fieldset>
+
+        {#if explainingError}
+          <div class="flex items-center gap-2 text-sm">
+            <span class="loading loading-spinner loading-sm"></span>
+            <span>Diagnosing the error...</span>
+          </div>
+        {:else if explanationError}
+          <div role="alert" class="alert alert-error alert-soft text-sm">{explanationError}</div>
+        {:else if errorExplanation}
+          <div class="bg-base-200 rounded-box whitespace-pre-wrap px-3 py-3 text-sm leading-6">
+            {errorExplanation}
+          </div>
+        {/if}
+      </div>
+
+      <div class="modal-action">
+        <form method="dialog">
+          <button class="btn btn-ghost" disabled={explainingError}>Close</button>
+        </form>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+      <button disabled={explainingError}>close</button>
     </form>
   </dialog>
 </div>

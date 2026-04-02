@@ -8,9 +8,10 @@
   interface Props {
     value: string;
     onrun: () => void;
+    onprompt: () => void;
   }
 
-  let { value = $bindable(''), onrun }: Props = $props();
+  let { value = $bindable(''), onrun, onprompt }: Props = $props();
 
   let container: HTMLDivElement;
   let editor: ace.Ace.Editor | null = null;
@@ -52,6 +53,12 @@
       name: 'runQuery',
       bindKey: { win: 'Ctrl-Enter', mac: 'Command-Enter' },
       exec: () => onrun(),
+    });
+
+    editor.commands.addCommand({
+      name: 'promptQuery',
+      bindKey: { win: 'Ctrl-I', mac: 'Command-I' },
+      exec: () => onprompt(),
     });
 
     editor.session.on('change', () => {
