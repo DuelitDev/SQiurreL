@@ -81,6 +81,10 @@ impl Executor {
     fn expr_label(expr: &Expr) -> String {
         match expr {
             Expr::Ident(name) => name.to_string(),
+            Expr::List(values) => format!(
+                "({})",
+                values.iter().map(Self::expr_label).collect::<Vec<_>>().join(", ")
+            ),
             _ => format!("{expr:?}"),
         }
     }
@@ -101,6 +105,9 @@ impl Executor {
             Expr::Real(r) => Ok(DataValue::Real(*r)),
             Expr::Bool(b) => Ok(DataValue::Bool(*b)),
             Expr::Text(s) => Ok(DataValue::Text(s.clone())),
+            Expr::List(_) => {
+                Err(SQRLErr::UnsupportedFeature("list expression".to_string()))
+            }
             Expr::Ident(name) => {
                 let (table, row) = match (table, row) {
                     (Some(table), Some(row)) => (table, row),
@@ -138,6 +145,21 @@ impl Executor {
                 }
             }
             Expr::Binary { op, left, right } => {
+                if *op == Token::In {
+                    let left = self.eval_in_row(left, table, row)?;
+                    let Expr::List(values) = right.as_ref() else {
+                        return Err(SQRLErr::InvalidBinaryOp(
+                            "IN requires a parenthesized value list".to_string(),
+                        ));
+                    };
+                    let is_match = values
+                        .iter()
+                        .map(|expr| self.eval_in_row(expr, table, row))
+                        .collect::<Result<Vec<_>>>()?
+                        .into_iter()
+                        .any(|value| value == left);
+                    return Ok(DataValue::Bool(is_match));
+                }
                 let left = self.eval_in_row(left, table, row)?;
                 let right = self.eval_in_row(right, table, row)?;
                 self.eval_binary(op, left, right)

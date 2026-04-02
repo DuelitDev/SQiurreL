@@ -87,6 +87,7 @@ pub enum Expr {
     Bool(bool),
     Text(Box<str>),
     Ident(Box<str>),
+    List(Vec<Expr>),
     Unary { op: Token, right: Box<Expr> },
     Binary { op: Token, left: Box<Expr>, right: Box<Expr> },
 }
@@ -114,7 +115,7 @@ impl Parser {
         match token {
             Token::Or => 1,
             Token::And => 2,
-            Token::OpEq => 3,
+            Token::OpEq | Token::In => 3,
             Token::OpGt | Token::OpLt | Token::OpGe | Token::OpLe => 4,
             Token::OpAdd | Token::OpSub => 5,
             Token::OpMul | Token::OpDiv => 6,
@@ -449,6 +450,13 @@ impl Parser {
         let spanned = self.next()?;
         let prec = Self::precedence(&spanned.token);
         match spanned.token {
+            Token::In => {
+                let left = left.boxed();
+                let right =
+                    Expr::List(self.parse_list_clause(true, |p| p.parse_expr(0))?)
+                        .boxed();
+                Ok(Expr::Binary { op: Token::In, left, right })
+            }
             op if prec > 0 => {
                 let left = left.boxed();
                 let right = self.parse_expr(prec)?.boxed();
