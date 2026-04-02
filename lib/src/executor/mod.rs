@@ -2,6 +2,7 @@ use crate::query::lexer::Token;
 use crate::query::{Expr, QueryErr, Stmt};
 use crate::schema::{DataType, DataValue};
 use crate::storage::{ColId, RowId, RowState, Storage, StorageErr, TableState};
+use std::cmp::Ordering;
 use std::collections::HashSet;
 
 #[derive(serde::Serialize)]
@@ -53,6 +54,9 @@ pub enum SQRLErr {
 
     #[error("unsupported feature: {0}")]
     UnsupportedFeature(String),
+
+    #[error("invalid function call: {0}")]
+    InvalidFunction(String),
 }
 
 pub type Result<T> = std::result::Result<T, SQRLErr>;
@@ -124,11 +128,106 @@ impl Executor {
     fn expr_label(expr: &Expr) -> String {
         match expr {
             Expr::Ident(name) => name.to_string(),
+            Expr::Wildcard => "*".to_string(),
             Expr::List(values) => format!(
                 "({})",
                 values.iter().map(Self::expr_label).collect::<Vec<_>>().join(", ")
             ),
+            Expr::Call { name, args } => format!(
+                "{}({})",
+                name,
+                args.iter().map(Self::expr_label).collect::<Vec<_>>().join(", ")
+            ),
             _ => format!("{expr:?}"),
+        }
+    }
+
+    fn is_aggregate(expr: &Expr) -> bool {
+        matches!(expr, Expr::Call { name, .. } if matches!(name.to_ascii_uppercase().as_str(), "MAX" | "COUNT"))
+    }
+
+    fn compare_values(left: &DataValue, right: &DataValue) -> Result<Ordering> {
+        let ord = match (left, right) {
+            (DataValue::Int(left), DataValue::Int(right)) => Some(left.cmp(right)),
+            (DataValue::Int(left), DataValue::Real(right)) => {
+                (*left as f64).partial_cmp(right)
+            }
+            (DataValue::Real(left), DataValue::Int(right)) => {
+                left.partial_cmp(&(*right as f64))
+            }
+            (DataValue::Real(left), DataValue::Real(right)) => left.partial_cmp(right),
+            (DataValue::Text(left), DataValue::Text(right)) => Some(left.cmp(right)),
+            (DataValue::Bool(left), DataValue::Bool(right)) => Some(left.cmp(right)),
+            (DataValue::Nil, DataValue::Nil) => Some(Ordering::Equal),
+            _ => None,
+        };
+        ord.ok_or_else(|| {
+            SQRLErr::InvalidFunction(format!(
+                "cannot compare {:?} and {:?}",
+                left.data_type(),
+                right.data_type()
+            ))
+        })
+    }
+
+    fn eval_aggregate(
+        &self,
+        expr: &Expr,
+        table: &TableState,
+        rows: &[&RowState],
+    ) -> Result<DataValue> {
+        let Expr::Call { name, args } = expr else {
+            return Err(SQRLErr::InvalidFunction(
+                "expected aggregate call".to_string(),
+            ));
+        };
+
+        match name.to_ascii_uppercase().as_str() {
+            "COUNT" => {
+                if args.len() != 1 {
+                    return Err(SQRLErr::InvalidFunction(
+                        "COUNT() expects exactly one argument".to_string(),
+                    ));
+                }
+                let count = match &args[0] {
+                    Expr::Wildcard => rows.len() as i64,
+                    arg => rows
+                        .iter()
+                        .map(|row| self.eval_in_row(arg, Some(table), Some(row)))
+                        .collect::<Result<Vec<_>>>()?
+                        .into_iter()
+                        .filter(|value| *value != DataValue::Nil)
+                        .count() as i64,
+                };
+                Ok(DataValue::Int(count))
+            }
+            "MAX" => {
+                if args.len() != 1 {
+                    return Err(SQRLErr::InvalidFunction(
+                        "MAX() expects exactly one argument".to_string(),
+                    ));
+                }
+                if matches!(args[0], Expr::Wildcard) {
+                    return Err(SQRLErr::InvalidFunction(
+                        "MAX(*) is not supported".to_string(),
+                    ));
+                }
+                let mut max_value: Option<DataValue> = None;
+                for row in rows {
+                    let value = self.eval_in_row(&args[0], Some(table), Some(row))?;
+                    if value == DataValue::Nil {
+                        continue;
+                    }
+                    match &max_value {
+                        Some(current)
+                            if Self::compare_values(&value, current)?
+                                != Ordering::Greater => {}
+                        _ => max_value = Some(value),
+                    }
+                }
+                Ok(max_value.unwrap_or(DataValue::Nil))
+            }
+            _ => Err(SQRLErr::UnsupportedFeature(format!("function {name}"))),
         }
     }
 
@@ -148,9 +247,15 @@ impl Executor {
             Expr::Real(r) => Ok(DataValue::Real(*r)),
             Expr::Bool(b) => Ok(DataValue::Bool(*b)),
             Expr::Text(s) => Ok(DataValue::Text(s.clone())),
+            Expr::Wildcard => {
+                Err(SQRLErr::UnsupportedFeature("wildcard expression".to_string()))
+            }
             Expr::List(_) => {
                 Err(SQRLErr::UnsupportedFeature("list expression".to_string()))
             }
+            Expr::Call { name, .. } => Err(SQRLErr::UnsupportedFeature(format!(
+                "function {name} outside aggregate SELECT"
+            ))),
             Expr::Ident(name) => {
                 let (table, row) = match (table, row) {
                     (Some(table), Some(row)) => (table, row),
@@ -714,12 +819,29 @@ impl Executor {
             table.rows.values().filter(|row| row.alive).collect::<Vec<_>>();
         live_rows.sort_by_key(|row| row.id.0);
 
-        let mut result_rows = Vec::new();
+        let mut filtered_rows = Vec::new();
         for row in live_rows {
-            if !self.matches_where(table, row, where_clause.as_ref())? {
-                continue;
+            if self.matches_where(table, row, where_clause.as_ref())? {
+                filtered_rows.push(row);
             }
+        }
 
+        let has_aggregate = projections.iter().any(Self::is_aggregate);
+        if has_aggregate {
+            if projections.iter().any(|expr| !Self::is_aggregate(expr)) {
+                return Err(SQRLErr::UnsupportedFeature(
+                    "mixing aggregate and non-aggregate projections".to_string(),
+                ));
+            }
+            let values = projections
+                .iter()
+                .map(|expr| self.eval_aggregate(expr, table, &filtered_rows))
+                .collect::<Result<Vec<_>>>()?;
+            return Ok((result_columns, vec![values]));
+        }
+
+        let mut result_rows = Vec::new();
+        for row in filtered_rows {
             let values = projections
                 .iter()
                 .map(|expr| self.eval_in_row(expr, Some(table), Some(row)))

@@ -92,7 +92,9 @@ pub enum Expr {
     Bool(bool),
     Text(Box<str>),
     Ident(Box<str>),
+    Wildcard,
     List(Vec<Expr>),
+    Call { name: Box<str>, args: Vec<Expr> },
     Unary { op: Token, right: Box<Expr> },
     Binary { op: Token, left: Box<Expr>, right: Box<Expr> },
 }
@@ -442,7 +444,14 @@ impl Parser {
             Token::Real(f) => Ok(Expr::Real(f)),
             Token::Bool(b) => Ok(Expr::Bool(b)),
             Token::Text(t) => Ok(Expr::Text(t.into_boxed_str())),
-            Token::Ident(i) => Ok(Expr::Ident(i.into_boxed_str())),
+            Token::Ident(i) => {
+                let name = i.into_boxed_str();
+                if self.curr.token == Token::LParen {
+                    self.parse_call(name)
+                } else {
+                    Ok(Expr::Ident(name))
+                }
+            }
             op @ (Token::Not | Token::OpSub) => {
                 let right = self.parse_expr(7)?.boxed();
                 Ok(Expr::Unary { op, right })
@@ -456,6 +465,27 @@ impl Parser {
                 span: spanned.span,
             }),
         }
+    }
+
+    fn parse_call(&mut self, name: Box<str>) -> Result<Expr> {
+        self.expect(&[Token::LParen])?;
+        let mut args = Vec::new();
+        if self.curr.token != Token::RParen {
+            loop {
+                let arg = if self.curr.token == Token::OpMul {
+                    self.next()?;
+                    Expr::Wildcard
+                } else {
+                    self.parse_expr(0)?
+                };
+                args.push(arg);
+                if !self.maybe(&[Token::Comma])? {
+                    break;
+                }
+            }
+        }
+        self.expect(&[Token::RParen])?;
+        Ok(Expr::Call { name, args })
     }
 
     fn parse_group(&mut self) -> Result<Expr> {
