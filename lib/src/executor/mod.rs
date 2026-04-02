@@ -138,12 +138,22 @@ impl Executor {
                 name,
                 args.iter().map(Self::expr_label).collect::<Vec<_>>().join(", ")
             ),
+            Expr::Alias { alias, .. } => alias.to_string(),
             _ => format!("{expr:?}"),
         }
     }
 
     fn is_aggregate(expr: &Expr) -> bool {
-        matches!(expr, Expr::Call { name, .. } if matches!(name.to_ascii_uppercase().as_str(), "MAX" | "MIN" | "SUM" | "AVG" | "COUNT"))
+        match expr {
+            Expr::Alias { expr, .. } => Self::is_aggregate(expr),
+            Expr::Call { name, .. } => {
+                matches!(
+                    name.to_ascii_uppercase().as_str(),
+                    "MAX" | "MIN" | "SUM" | "AVG" | "COUNT"
+                )
+            }
+            _ => false,
+        }
     }
 
     fn compare_values(left: &DataValue, right: &DataValue) -> Result<Ordering> {
@@ -177,6 +187,9 @@ impl Executor {
         rows: &[&RowState],
     ) -> Result<DataValue> {
         let Expr::Call { name, args } = expr else {
+            if let Expr::Alias { expr: inner_expr, .. } = expr {
+                return self.eval_aggregate(inner_expr, table, rows);
+            }
             return Err(SQRLErr::InvalidFunction(
                 "expected aggregate call".to_string(),
             ));
@@ -388,6 +401,7 @@ impl Executor {
             Expr::List(_) => {
                 Err(SQRLErr::UnsupportedFeature("list expression".to_string()))
             }
+            Expr::Alias { expr, .. } => self.eval_in_row(expr, table, row),
             Expr::Call { name, .. } => Err(SQRLErr::UnsupportedFeature(format!(
                 "function {name} outside aggregate SELECT"
             ))),

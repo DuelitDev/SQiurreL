@@ -35,6 +35,7 @@ pub enum Token {
     Values,   // VALUES
     Select,   // SELECT
     Distinct, // DISTINCT
+    As,       // AS
     From,     // FROM
     Where,    // WHERE
     Group,    // GROUP
@@ -302,6 +303,7 @@ impl Lexer {
             "VALUES" => Token::Values,
             "SELECT" => Token::Select,
             "DISTINCT" => Token::Distinct,
+            "AS" => Token::As,
             "FROM" => Token::From,
             "WHERE" => Token::Where,
             "GROUP" => Token::Group,

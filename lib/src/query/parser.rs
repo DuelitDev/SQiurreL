@@ -95,6 +95,7 @@ pub enum Expr {
     Wildcard,
     List(Vec<Expr>),
     Call { name: Box<str>, args: Vec<Expr> },
+    Alias { expr: Box<Expr>, alias: Box<str> },
     Unary { op: Token, right: Box<Expr> },
     Binary { op: Token, left: Box<Expr>, right: Box<Expr> },
 }
@@ -263,7 +264,7 @@ impl Parser {
         let distinct = self.maybe(&[Token::Distinct])?;
         // 전체 컬럼 선택 '*' 처리
         let columns = if !self.maybe(&[Token::OpMul])? {
-            self.parse_list_clause(false, |p| p.parse_expr(0))?
+            self.parse_list_clause(false, |p| p.parse_select_expr())?
         } else {
             vec![]
         };
@@ -284,6 +285,16 @@ impl Parser {
             order_by,
             limit,
         })
+    }
+
+    fn parse_select_expr(&mut self) -> Result<Expr> {
+        let expr = self.parse_expr(0)?;
+        if self.maybe(&[Token::As])? {
+            let alias = self.consume_ident()?;
+            Ok(Expr::Alias { expr: expr.boxed(), alias })
+        } else {
+            Ok(expr)
+        }
     }
 
     fn parse_update(&mut self) -> Result<Stmt> {
