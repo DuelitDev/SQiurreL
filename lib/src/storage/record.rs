@@ -51,6 +51,7 @@ pub(super) fn read_rec(r: &mut impl Read) -> Result<Record> {
     let payload = match tag {
         TableCreate::TAG => TableCreate::decode(&mut dec)?,
         TableTruncate::TAG => TableTruncate::decode(&mut dec)?,
+        TableRename::TAG => TableRename::decode(&mut dec)?,
         TableDrop::TAG => TableDrop::decode(&mut dec)?,
         ColumnCreate::TAG => ColumnCreate::decode(&mut dec)?,
         ColumnAlter::TAG => ColumnAlter::decode(&mut dec)?,
@@ -67,6 +68,7 @@ pub(super) fn read_rec(r: &mut impl Read) -> Result<Record> {
 pub enum Record {
     TableCreate(TableCreate),
     TableTruncate(TableTruncate),
+    TableRename(TableRename),
     TableDrop(TableDrop),
     ColumnCreate(ColumnCreate),
     ColumnAlter(ColumnAlter),
@@ -138,6 +140,27 @@ impl Recordable for TableDrop {
 
     fn decode(dec: &mut Decoder<&[u8]>) -> Result<Record> {
         Ok(Record::TableDrop(Self { table_id: TableId(dec.u64()?) }))
+    }
+}
+
+pub struct TableRename {
+    pub table_id: TableId,
+    pub new_table_name: Box<str>,
+}
+
+impl Recordable for TableRename {
+    const TAG: u8 = 14;
+
+    fn encode(&self, enc: &mut Encoder) {
+        enc.u64(self.table_id.0);
+        enc.text(&self.new_table_name);
+    }
+
+    fn decode(dec: &mut Decoder<&[u8]>) -> Result<Record> {
+        Ok(Record::TableRename(Self {
+            table_id: TableId(dec.u64()?),
+            new_table_name: dec.text()?,
+        }))
     }
 }
 

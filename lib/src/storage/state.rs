@@ -115,6 +115,7 @@ impl DbState {
         match record {
             Record::TableCreate(rec) => self.commit_table_create(rec),
             Record::TableTruncate(rec) => self.commit_table_truncate(rec),
+            Record::TableRename(rec) => self.commit_table_rename(rec),
             Record::TableDrop(rec) => self.commit_table_drop(rec),
             Record::ColumnCreate(rec) => self.commit_column_create(rec),
             Record::ColumnAlter(rec) => self.commit_column_alter(rec),
@@ -144,6 +145,13 @@ impl DbState {
             .get_table_mut(&rec.table_id)
             .expect("corrupted: table not found during commit");
         table.rows.clear();
+    }
+
+    pub fn commit_table_rename(&mut self, rec: TableRename) {
+        let table = self
+            .get_table_mut(&rec.table_id)
+            .expect("corrupted: table not found during commit");
+        table.name = rec.new_table_name;
     }
 
     pub fn commit_table_drop(&mut self, rec: TableDrop) {

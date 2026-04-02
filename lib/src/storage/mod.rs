@@ -139,6 +139,32 @@ impl Storage {
         Ok(())
     }
 
+    pub fn rename_table(&mut self, table_id: TableId, new_name: &str) -> Result<()> {
+        if let Some(existing) = self.state.get_table_by_name(new_name) {
+            if existing.id != table_id {
+                return Err(StorageErr::TableAlreadyExists {
+                    id: existing.id,
+                    name: new_name.into(),
+                });
+            }
+        }
+
+        let table = self
+            .state
+            .get_table(&table_id)
+            .ok_or(StorageErr::TableNotFound(table_id))?;
+        if !table.alive {
+            return Err(StorageErr::TableNotFound(table_id));
+        }
+
+        let seq = self.state.next_seq_no();
+        let rec = TableRename { table_id, new_table_name: new_name.into() };
+
+        write_rec(&mut self.file, &rec, seq)?;
+        self.state.commit_table_rename(rec);
+        Ok(())
+    }
+
     pub fn drop_table(&mut self, table_id: TableId) -> Result<()> {
         let table = self
             .state

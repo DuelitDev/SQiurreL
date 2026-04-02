@@ -337,6 +337,15 @@ impl Executor {
             Stmt::Create { table_name, defines, if_not_exists } => {
                 self.run_create(&table_name, defines, if_not_exists)
             }
+            Stmt::AlterAdd { table_name, define } => {
+                self.run_alter_add(&table_name, define)
+            }
+            Stmt::AlterDrop { table_name, column } => {
+                self.run_alter_drop(&table_name, &column)
+            }
+            Stmt::AlterRename { table_name, new_name } => {
+                self.run_alter_rename(&table_name, &new_name)
+            }
             Stmt::InsertValues { table_name, columns, values } => {
                 self.run_insert_values(&table_name, columns, values)
             }
@@ -386,6 +395,41 @@ impl Executor {
         for (name, dt) in defines {
             self.storage.create_column(table_id, dt, &name)?;
         }
+        Ok(QueryResult::Success)
+    }
+
+    fn run_alter_add(
+        &mut self,
+        table_name: &str,
+        define: (Box<str>, DataType),
+    ) -> Result<QueryResult> {
+        let table_id = self.storage.get_table(table_name)?.id;
+        let (name, data_type) = define;
+        self.storage.create_column(table_id, data_type, &name)?;
+        Ok(QueryResult::Success)
+    }
+
+    fn run_alter_drop(
+        &mut self,
+        table_name: &str,
+        column: &str,
+    ) -> Result<QueryResult> {
+        let table = self.storage.get_table(table_name)?;
+        let column_id = table
+            .get_col_by_name(column)
+            .ok_or_else(|| SQRLErr::ColumnNotFound(column.to_string()))?
+            .id;
+        self.storage.drop_column(table.id, column_id)?;
+        Ok(QueryResult::Success)
+    }
+
+    fn run_alter_rename(
+        &mut self,
+        table_name: &str,
+        new_name: &str,
+    ) -> Result<QueryResult> {
+        let table_id = self.storage.get_table(table_name)?.id;
+        self.storage.rename_table(table_id, new_name)?;
         Ok(QueryResult::Success)
     }
 
